@@ -1,0 +1,90 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Driver {
+  id        String   @id @default(uuid())
+  name      String
+  phone     String
+  email     String?
+  status    String   @default("new") // new, calling, contacted, qualified, disqualified
+  createdAt DateTime @default(now()) @map("created_at")
+
+  calls              Call[]
+  interviewResponses InterviewResponse[]
+
+  @@map("drivers")
+}
+
+model Call {
+  id              String    @id @default(uuid())
+  driverId        String    @map("driver_id")
+  agentId         String?   @map("agent_id")
+  blandCallId     String?   @unique @map("bland_call_id")
+  vapiCallId      String?   @unique @map("vapi_call_id")
+  startTime       DateTime  @default(now()) @map("start_time")
+  endTime         DateTime? @map("end_time")
+  durationSeconds Int?      @map("duration_seconds")
+  recordingUrl    String?   @map("recording_url")
+  transcript      String?
+  summary         String?
+  status          String? // completed, failed, no-answer
+  price           Float?
+  callEndedBy     String?   @map("call_ended_by")
+  answeredBy      String?   @map("answered_by")
+  analysis        String?   // JSON string
+  variables       String?   // JSON string
+
+  driver             Driver              @relation(fields: [driverId], references: [id])
+  agent              Agent?              @relation(fields: [agentId], references: [id])
+  interviewResponses InterviewResponse[]
+
+  @@map("calls")
+}
+
+model Agent {
+  id           String   @id @default(uuid())
+  name         String
+  systemPrompt String
+  questions    String   // JSON stringified: { id: string, text: string }[]
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  calls Call[]
+
+  @@map("agents")
+}
+
+model InterviewResponse {
+  id           String   @id @default(uuid())
+  callId       String?  @map("call_id")
+  driverId     String?  @map("driver_id")
+  questionId   String?  @map("question_id") // cdl_license, experience_years, violations, work_preference
+  questionText String?  @map("question_text")
+  answerText   String?  @map("answer_text")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  call   Call?   @relation(fields: [callId], references: [id])
+  driver Driver? @relation(fields: [driverId], references: [id])
+
+  @@map("interview_responses")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
