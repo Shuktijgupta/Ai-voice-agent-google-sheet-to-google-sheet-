@@ -91,6 +91,36 @@ export default function CallHistoryPage() {
         });
     };
 
+    const [activeCall, setActiveCall] = useState<any>(null);
+
+    // Poll for active calls
+    useEffect(() => {
+        const checkActiveCalls = async () => {
+            try {
+                // Check if any driver is in 'calling' state
+                const res = await fetch('/api/drivers');
+                const drivers = await res.json();
+                const activeDriver = drivers.find((d: any) => d.status === 'calling');
+
+                if (activeDriver) {
+                    // In a real app, you'd fetch live logs from a websocket or API
+                    // For now, we'll simulate or show a placeholder if no logs are available
+                    setActiveCall({
+                        driverId: activeDriver.id,
+                        logs: [`System: Call in progress with ${activeDriver.name}...`]
+                    });
+                } else {
+                    setActiveCall(null);
+                }
+            } catch (error) {
+                console.error('Failed to check active calls:', error);
+            }
+        };
+
+        const interval = setInterval(checkActiveCalls, 3000);
+        return () => clearInterval(interval);
+    }, []);
+
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center bg-background">
             <div className="relative">
@@ -149,79 +179,117 @@ export default function CallHistoryPage() {
                     </div>
                 </div>
 
-                <div className="glass-card rounded-2xl overflow-hidden border border-border">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead>
-                                <tr className="bg-secondary/30 border-b border-border text-left">
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Date & Time</th>
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Driver</th>
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Agent</th>
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Duration</th>
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Status</th>
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Recording</th>
-                                    <th className="p-4 font-semibold text-sm text-muted-foreground">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border">
-                                {calls.map((call) => (
-                                    <tr key={call.id} className="hover:bg-secondary/20 transition-colors">
-                                        <td className="p-4 text-sm text-foreground whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                <Calendar className="w-4 h-4 text-muted-foreground" />
-                                                {formatDate(call.startTime)}
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-sm font-medium text-foreground">
-                                            <div className="flex items-center gap-2">
-                                                <User className="w-4 h-4 text-primary" />
-                                                {call.driver?.name || 'Unknown'}
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-sm text-muted-foreground">
-                                            {call.agent?.name || 'Default'}
-                                        </td>
-                                        <td className="p-4 text-sm text-muted-foreground font-mono">
-                                            {formatDuration(call.durationSeconds)}
-                                        </td>
-                                        <td className="p-4">
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${call.status === 'completed'
-                                                ? 'bg-green-500/10 text-green-600 border-green-500/20'
-                                                : 'bg-red-500/10 text-red-600 border-red-500/20'
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                    {/* Main History Table */}
+                    <div className="lg:col-span-2 glass-card rounded-2xl overflow-hidden border border-border">
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead>
+                                    <tr className="bg-secondary/30 border-b border-border text-left">
+                                        <th className="p-4 font-semibold text-sm text-muted-foreground">Date & Time</th>
+                                        <th className="p-4 font-semibold text-sm text-muted-foreground">Driver</th>
+                                        <th className="p-4 font-semibold text-sm text-muted-foreground">Duration</th>
+                                        <th className="p-4 font-semibold text-sm text-muted-foreground">Status</th>
+                                        <th className="p-4 font-semibold text-sm text-muted-foreground">Recording</th>
+                                        <th className="p-4 font-semibold text-sm text-muted-foreground">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border">
+                                    {calls.map((call) => (
+                                        <tr key={call.id} className="hover:bg-secondary/20 transition-colors">
+                                            <td className="p-4 text-sm text-foreground whitespace-nowrap">
+                                                <div className="flex items-center gap-2">
+                                                    <Calendar className="w-4 h-4 text-muted-foreground" />
+                                                    {formatDate(call.startTime)}
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-sm font-medium text-foreground">
+                                                <div className="flex items-center gap-2">
+                                                    <User className="w-4 h-4 text-primary" />
+                                                    {call.driver?.name || 'Unknown'}
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-sm text-muted-foreground font-mono">
+                                                {formatDuration(call.durationSeconds)}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border capitalize ${call.status === 'completed'
+                                                    ? 'bg-green-500/10 text-green-600 border-green-500/20'
+                                                    : call.status === 'failed' || call.status === 'no-answer'
+                                                        ? 'bg-red-500/10 text-red-600 border-red-500/20'
+                                                        : 'bg-blue-500/10 text-blue-600 border-blue-500/20'
+                                                    }`}>
+                                                    {call.status || 'Unknown'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4">
+                                                {call.recordingUrl ? (
+                                                    <audio controls className="h-8 w-32 rounded-lg">
+                                                        <source src={call.recordingUrl} type="audio/mpeg" />
+                                                    </audio>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground italic">No recording</span>
+                                                )}
+                                            </td>
+                                            <td className="p-4">
+                                                <button
+                                                    onClick={() => setSelectedTranscript(call)}
+                                                    className="p-2 hover:bg-secondary rounded-lg transition-colors text-primary hover:text-primary/80"
+                                                    title="View Transcript"
+                                                >
+                                                    <FileText className="w-5 h-5" />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {calls.length === 0 && (
+                                        <tr>
+                                            <td colSpan={6} className="p-12 text-center text-muted-foreground">
+                                                No calls found.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Live Call Transcript (Right Column) */}
+                    <div className="space-y-8 sticky top-6">
+                        <div className="glass-card rounded-2xl overflow-hidden h-[500px] flex flex-col">
+                            <div className="p-4 border-b border-border bg-secondary/30">
+                                <h2 className="text-sm font-bold text-foreground flex items-center gap-2 uppercase tracking-wider">
+                                    <div className={`w-2 h-2 rounded-full ${activeCall ? 'bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-muted-foreground'}`}></div>
+                                    Live Call Transcript
+                                </h2>
+                            </div>
+                            <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-background/50 scrollbar-thin scrollbar-thumb-border">
+                                {activeCall ? (
+                                    activeCall.logs.map((log: string, i: number) => (
+                                        <div key={i} className={`flex ${log.startsWith('Agent:') ? 'justify-start' : log.startsWith('Driver:') ? 'justify-end' : 'justify-center'}`}>
+                                            <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${log.startsWith('Agent:')
+                                                ? 'bg-card text-foreground rounded-tl-none border border-border'
+                                                : log.startsWith('Driver:')
+                                                    ? 'bg-primary text-primary-foreground rounded-tr-none'
+                                                    : 'bg-transparent shadow-none text-muted-foreground text-xs py-1 font-mono'
                                                 }`}>
-                                                {call.status === 'completed' ? 'Success' : 'Failed'}
-                                            </span>
-                                        </td>
-                                        <td className="p-4">
-                                            {call.recordingUrl ? (
-                                                <audio controls className="h-8 w-48 rounded-lg">
-                                                    <source src={call.recordingUrl} type="audio/mpeg" />
-                                                    Your browser does not support the audio element.
-                                                </audio>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground italic">No recording</span>
-                                            )}
-                                        </td>
-                                        <td className="p-4">
-                                            <button
-                                                onClick={() => setSelectedTranscript(call)}
-                                                className="p-2 hover:bg-secondary rounded-lg transition-colors text-primary hover:text-primary/80"
-                                                title="View Transcript"
-                                            >
-                                                <FileText className="w-5 h-5" />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                                {calls.length === 0 && (
-                                    <tr>
-                                        <td colSpan={7} className="p-12 text-center text-muted-foreground">
-                                            No calls found.
-                                        </td>
-                                    </tr>
+                                                {log.replace(/^(Agent:|Driver:|System:)\s*/, '')}
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
+                                        <div className="w-20 h-20 rounded-full bg-secondary/50 flex items-center justify-center animate-pulse">
+                                            <Phone className="w-10 h-10 opacity-20" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="font-medium text-foreground">No Active Calls</p>
+                                            <p className="text-sm opacity-70">Live transcripts will appear here</p>
+                                        </div>
+                                    </div>
                                 )}
-                            </tbody>
-                        </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

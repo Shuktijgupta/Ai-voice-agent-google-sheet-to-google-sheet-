@@ -16,6 +16,8 @@ model Driver {
   phone     String
   email     String?
   status    String   @default("new") // new, calling, contacted, qualified, disqualified
+  source    String?  @default("manual") // manual, google_sheets
+  externalId String? @map("external_id") // ID from external source (e.g. row number)
   createdAt DateTime @default(now()) @map("created_at")
 
   calls              Call[]
@@ -29,6 +31,7 @@ model Call {
   driverId        String    @map("driver_id")
   agentId         String?   @map("agent_id")
   blandCallId     String?   @unique @map("bland_call_id")
+
   vapiCallId      String?   @unique @map("vapi_call_id")
   startTime       DateTime  @default(now()) @map("start_time")
   endTime         DateTime? @map("end_time")

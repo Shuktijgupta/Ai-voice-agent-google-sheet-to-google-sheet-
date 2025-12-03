@@ -3,26 +3,26 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import { useRouter } from 'next/navigation';
-import { Sun, Moon, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-    const [darkMode, setDarkMode] = useState(false);
     const router = useRouter();
+    const [isInitialized, setIsInitialized] = useState(false);
 
+    // Initialize theme
     useEffect(() => {
-        const isDark = localStorage.getItem('darkMode') === 'true';
-        setDarkMode(isDark);
-    }, []);
-
-    useEffect(() => {
-        if (darkMode) {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'dark') {
             document.documentElement.classList.add('dark');
-            localStorage.setItem('darkMode', 'true');
-        } else {
+        } else if (savedTheme === 'light') {
             document.documentElement.classList.remove('dark');
-            localStorage.setItem('darkMode', 'false');
+        } else {
+            // Default to dark if no preference
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
         }
-    }, [darkMode]);
+        setIsInitialized(true);
+    }, []);
 
     const handleLogout = async () => {
         await fetch('/api/auth/logout', { method: 'POST' });
@@ -30,36 +30,37 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         router.refresh();
     };
 
+    if (!isInitialized) return null;
+
     return (
-        <div className="flex min-h-screen bg-background transition-colors duration-300">
+        <div className="flex min-h-screen bg-background text-foreground font-sans selection:bg-primary/20 transition-colors duration-300">
             <Sidebar />
-            <div className="flex-1 flex flex-col relative overflow-hidden">
-                {/* Background decorative elements */}
-                <div className="absolute top-0 left-0 w-full h-96 bg-primary/5 -z-10 blur-3xl rounded-b-[50%]"></div>
-                <div className="absolute top-20 right-20 w-72 h-72 bg-purple-500/5 -z-10 blur-3xl rounded-full"></div>
+            <div className="flex-1 flex flex-col relative overflow-hidden bg-background">
 
                 {/* Header */}
-                <header className="h-20 flex items-center justify-end px-8 sticky top-0 z-40 backdrop-blur-sm">
+                <header className="h-16 flex items-center justify-between px-8 border-b border-border bg-background sticky top-0 z-40 transition-colors duration-300">
                     <div className="flex items-center gap-4">
-                        <button
-                            onClick={() => setDarkMode(!darkMode)}
-                            className="p-2.5 rounded-full bg-white/50 dark:bg-gray-800/50 border border-white/20 dark:border-gray-700/50 text-muted-foreground hover:text-primary hover:bg-white dark:hover:bg-gray-800 transition-all shadow-sm backdrop-blur-md"
-                        >
-                            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                        <h2 className="text-xl font-semibold text-foreground">Settings</h2>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <button className="px-4 py-1.5 rounded-full bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors">
+                            Profile
+                        </button>
+                        <button className="text-sm text-gray-400 hover:text-white transition-colors">
+                            Workspace Invites
                         </button>
                         <button
                             onClick={handleLogout}
-                            className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/50 dark:bg-gray-800/50 border border-white/20 dark:border-gray-700/50 text-sm font-medium text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all shadow-sm backdrop-blur-md"
+                            className="text-sm text-gray-400 hover:text-red-400 transition-colors flex items-center gap-2"
                         >
                             <LogOut className="w-4 h-4" />
-                            Logout
                         </button>
                     </div>
                 </header>
 
                 {/* Main Content */}
-                <main className="flex-1 px-8 pb-8 overflow-y-auto">
-                    <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <main className="flex-1 overflow-y-auto">
+                    <div className="max-w-7xl mx-auto p-8 animate-in fade-in duration-500">
                         {children}
                     </div>
                 </main>

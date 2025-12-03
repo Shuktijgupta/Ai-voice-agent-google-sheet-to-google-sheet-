@@ -8,21 +8,47 @@ export async function PATCH(
     try {
         const { id } = await params;
         const body = await request.json();
-        const { status, responses } = body;
+        const { status, name, phone, email } = body;
 
-        // Update driver status
+        // Update driver details
         const driver = await prisma.driver.update({
             where: { id },
-            data: { status },
+            data: {
+                ...(status && { status }),
+                ...(name && { name }),
+                ...(phone && { phone }),
+                ...(email && { email }),
+            },
         });
-
-        // If there are responses, we might want to save them too, 
-        // but for now the schema separates them into InterviewResponse.
-        // We'll handle InterviewResponse creation in a separate call or here if needed.
-        // For this iteration, we just update status.
 
         return NextResponse.json(driver);
     } catch (error) {
         return NextResponse.json({ error: 'Failed to update driver' }, { status: 500 });
+    }
+}
+
+export async function DELETE(
+    request: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const { id } = await params;
+
+        // Delete driver (cascade should handle relations if configured, otherwise we might need manual cleanup)
+        // Prisma schema usually needs explicit cascade delete or we delete related records first.
+        // Let's try simple delete first, assuming schema handles it or we catch error.
+
+        // Manual cleanup for safety if cascade isn't set in DB
+        await prisma.interviewResponse.deleteMany({ where: { driverId: id } });
+        await prisma.call.deleteMany({ where: { driverId: id } });
+
+        await prisma.driver.delete({
+            where: { id },
+        });
+
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error('Delete error:', error);
+        return NextResponse.json({ error: 'Failed to delete driver' }, { status: 500 });
     }
 }

@@ -1,694 +1,150 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Phone, CheckCircle, Play, FileText, User, XCircle, Upload, Download, Activity, Clock } from 'lucide-react';
-import { TRUCK_DRIVER_AGENT_CONFIG } from '@/lib/ai-agent-config';
-import Layout from './Layout';
+import Layout from '@/components/Layout';
+import { Users, Phone, Activity, ArrowRight, FileText } from 'lucide-react';
 import Link from 'next/link';
 
-
-interface ActiveCall {
-    driverId: string;
-    currentQuestionIndex: number;
-    logs: string[];
-}
-
 export default function Dashboard() {
-    const [drivers, setDrivers] = useState<any[]>([]);
-    const [agents, setAgents] = useState<any[]>([]);
-    const [activeAgentId, setActiveAgentId] = useState<string>('');
+    const [stats, setStats] = useState({
+        totalDrivers: 0,
+        totalCalls: 0,
+        completedCalls: 0,
+        failedCalls: 0
+    });
     const [loading, setLoading] = useState(true);
-    const [importModalOpen, setImportModalOpen] = useState(false);
-    const [sheetUrl, setSheetUrl] = useState('');
-    const [importing, setImporting] = useState(false);
-    const [newDriver, setNewDriver] = useState({ name: '', phone: '' });
-    const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
-    const [isAutoDialing, setIsAutoDialing] = useState(false);
-    const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
-    const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
-
-    const fetchDrivers = async () => {
-        try {
-            const res = await fetch('/api/drivers');
-            const data = await res.json();
-            setDrivers(data);
-            return data;
-        } catch (error) {
-            console.error('Failed to fetch drivers:', error);
-            return [];
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchAgents = async () => {
-        try {
-            const res = await fetch('/api/agents');
-            const data = await res.json();
-            if (Array.isArray(data)) {
-                setAgents(data);
-                if (data.length > 0 && !activeAgentId) {
-                    setActiveAgentId(data[0].id);
-                }
-            } else {
-                setAgents([]);
-            }
-        } catch (error) {
-            console.error('Failed to fetch agents:', error);
-            setAgents([]);
-        }
-    };
 
     useEffect(() => {
-        fetchDrivers();
-        fetchAgents();
+        const fetchStats = async () => {
+            try {
+                const [driversRes, callsRes] = await Promise.all([
+                    fetch('/api/drivers'),
+                    fetch('/api/calls')
+                ]);
+
+                const drivers = await driversRes.json();
+                const calls = await callsRes.json();
+
+                setStats({
+                    totalDrivers: Array.isArray(drivers) ? drivers.length : 0,
+                    totalCalls: Array.isArray(calls) ? calls.length : 0,
+                    completedCalls: Array.isArray(calls) ? calls.filter((c: any) => c.status === 'completed').length : 0,
+                    failedCalls: Array.isArray(calls) ? calls.filter((c: any) => c.status === 'failed').length : 0
+                });
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchStats();
     }, []);
 
-    // Polling for status updates
-    useEffect(() => {
-        const hasActiveCalls = drivers.some(d => d.status === 'calling') || activeCall !== null;
-        let interval: NodeJS.Timeout;
-
-        if (hasActiveCalls) {
-            interval = setInterval(() => {
-                fetchDrivers();
-            }, 3000);
-        }
-
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [drivers, activeCall]);
-
-    const handleImport = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setImporting(true);
-        try {
-            const res = await fetch('/api/drivers/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sheetUrl }),
-            });
-            const data = await res.json();
-            if (res.ok) {
-                alert(`Successfully imported ${data.count} drivers!`);
-                setImportModalOpen(false);
-                setSheetUrl('');
-                fetchDrivers();
-            } else {
-                alert(`Import failed: ${data.error}`);
-            }
-        } catch (error) {
-            alert('Import failed. Please check the URL.');
-        } finally {
-            setImporting(false);
-        }
-    };
-
-    const handleImportAndCall = async () => {
-        setImporting(true);
-        try {
-            const res = await fetch('/api/drivers/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sheetUrl }),
-            });
-            const data = await res.json();
-            if (res.ok) {
-                alert(`Successfully imported ${data.count} drivers!`);
-                setImportModalOpen(false);
-                setSheetUrl('');
-                const updatedDrivers = await fetchDrivers();
-
-                // Select all new drivers and start dialing
-                const newDriverIds = updatedDrivers
-                    .filter((d: any) => d.status === 'new')
-                    .map((d: any) => d.id);
-                setSelectedDriverIds(new Set(newDriverIds));
-                setIsAutoDialing(true);
-            } else {
-                alert(`Import failed: ${data.error}`);
-            }
-        } catch (error) {
-            alert('Import failed. Please check the URL.');
-        } finally {
-            setImporting(false);
-        }
-    };
-
-    const addDriver = async (e: React.FormEvent) => {
-        e.preventDefault();
-        try {
-            const res = await fetch('/api/drivers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newDriver),
-            });
-            if (res.ok) {
-                const driver = await res.json();
-                setDrivers(prev => [{ ...driver, responses: {} }, ...prev]);
-                setNewDriver({ name: '', phone: '' });
-            }
-        } catch (error) {
-            console.error('Failed to add driver:', error);
-        }
-    };
-
-    const updateDriverStatus = async (id: string, status: string) => {
-        try {
-            await fetch(`/api/drivers/${id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status }),
-            });
-            setDrivers(prev => prev.map(d => d.id === id ? { ...d, status } : d));
-        } catch (error) {
-            console.error('Failed to update driver status:', error);
-        }
-    };
-
-    const startCall = async (driverId: string) => {
-        try {
-            // Optimistic update
-            await updateDriverStatus(driverId, 'calling');
-
-            setActiveCall({
-                driverId,
-                currentQuestionIndex: 0,
-                logs: [`System: Initiating call via Bland AI...`]
-            });
-
-            const res = await fetch('/api/bland/start-call', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driverId, agentId: activeAgentId }),
-            });
-
-            if (!res.ok) {
-                const error = await res.json();
-                setActiveCall(prev => prev ? { ...prev, logs: [...prev.logs, `Error: ${error.error}`] } : null);
-                await updateDriverStatus(driverId, 'new'); // Revert status
-            } else {
-                setActiveCall(prev => prev ? { ...prev, logs: [...prev.logs, `System: Call initiated successfully. Waiting for connection...`] } : null);
-            }
-        } catch (error) {
-            console.error('Failed to start call:', error);
-            await updateDriverStatus(driverId, 'new');
-        }
-    };
-
-    // Auto-Dialer Logic
-    useEffect(() => {
-        let interval: NodeJS.Timeout;
-
-        if (isAutoDialing) {
-            interval = setInterval(async () => {
-                const currentDrivers = await fetchDrivers();
-
-                // Check if any call is currently active
-                const activeCall = currentDrivers.find((d: any) => d.status === 'calling');
-                if (activeCall) return; // Wait for current call to finish
-
-                // Find next new driver THAT IS SELECTED
-                const nextDriver = currentDrivers.find((d: any) => d.status === 'new' && selectedDriverIds.has(d.id));
-
-                if (nextDriver) {
-                    console.log(`Auto-Dialer: Starting call for ${nextDriver.name}`);
-                    startCall(nextDriver.id);
-                } else {
-                    // No new drivers left in selection
-                    setIsAutoDialing(false);
-                    alert('Auto-Dialer: All selected calls completed!');
-                }
-            }, 5000); // Check every 5 seconds
-        }
-
-        return () => clearInterval(interval);
-    }, [isAutoDialing, selectedDriverIds]);
-
-    const toggleSelectAll = () => {
-        if (selectedDriverIds.size === drivers.length) {
-            setSelectedDriverIds(new Set());
-        } else {
-            setSelectedDriverIds(new Set(drivers.map(d => d.id)));
-        }
-    };
-
-    const toggleSelectDriver = (id: string) => {
-        const newSelected = new Set(selectedDriverIds);
-        if (newSelected.has(id)) {
-            newSelected.delete(id);
-        } else {
-            newSelected.add(id);
-        }
-        setSelectedDriverIds(newSelected);
-    };
-
-    const handleExport = () => {
-        // Generate CSV
-        const headers = ['Name', 'Phone', 'Status', 'Transcript', 'Summary', 'Answers'];
-        const rows = drivers.map(d => {
-            const transcript = d.calls && d.calls.length > 0 ? d.calls[0].transcript || '' : '';
-            const summary = d.calls && d.calls.length > 0 ? d.calls[0].summary || '' : '';
-            const answers = d.responses ? JSON.stringify(d.responses) : '';
-
-            // Escape quotes for CSV
-            const escape = (str: string) => `"${String(str).replace(/"/g, '""')}"`;
-
-            return [
-                escape(d.name),
-                escape(d.phone),
-                escape(d.status),
-                escape(transcript),
-                escape(summary),
-                escape(answers)
-            ].join(',');
-        });
-
-        const csvContent = [headers.join(','), ...rows].join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', 'call_report.csv');
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
-
     if (loading) return (
-        <div className="min-h-screen flex items-center justify-center bg-background">
-            <div className="relative">
-                <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin"></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                    <Activity className="w-5 h-5 text-primary animate-pulse" />
+        <Layout>
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="relative">
+                    <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin"></div>
                 </div>
             </div>
-        </div>
+        </Layout>
     );
 
     return (
         <Layout>
-            {/* Import Modal */}
-            {importModalOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-background rounded-3xl shadow-2xl max-w-md w-full p-6 border border-border animate-in zoom-in-95 duration-200">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
-                                <Upload className="w-5 h-5 text-primary" />
-                                Import Drivers
-                            </h3>
-                            <button onClick={() => setImportModalOpen(false)} className="p-2 hover:bg-secondary rounded-full transition-colors">
-                                <XCircle className="w-6 h-6 text-muted-foreground" />
-                            </button>
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-6">
-                            Paste the link to a <strong>Public</strong> Google Sheet. It must have columns for <strong>Name</strong> and <strong>Phone</strong>.
-                        </p>
-                        <form onSubmit={handleImport} className="space-y-4">
-                            <input
-                                type="url"
-                                placeholder="https://docs.google.com/spreadsheets/d/..."
-                                value={sheetUrl}
-                                onChange={e => setSheetUrl(e.target.value)}
-                                className="w-full px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-                                required
-                            />
-                            <div className="grid grid-cols-2 gap-3">
-                                <button
-                                    type="submit"
-                                    disabled={importing}
-                                    className="w-full py-3 bg-secondary hover:bg-secondary/80 text-foreground font-medium rounded-xl transition-all flex items-center justify-center gap-2"
-                                >
-                                    {importing ? 'Importing...' : 'Import Only'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleImportAndCall}
-                                    disabled={importing}
-                                    className="w-full py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-xl transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 flex items-center justify-center gap-2"
-                                >
-                                    {importing ? 'Importing...' : 'Import & Call'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+            <div className="space-y-8">
+                <div>
+                    <h1 className="text-3xl font-bold text-foreground tracking-tight">Dashboard</h1>
+                    <p className="text-muted-foreground mt-1">Overview of your AI Voice Agent performance</p>
                 </div>
-            )}
 
-            {/* Transcript Modal */}
-            {selectedTranscript && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-background rounded-3xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col border border-border animate-in zoom-in-95 duration-200">
-                        <div className="p-6 border-b border-border flex justify-between items-center bg-background/80 backdrop-blur-md rounded-t-3xl sticky top-0 z-10">
-                            <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
-                                <FileText className="w-5 h-5 text-primary" />
-                                Call Transcript
-                            </h3>
-                            <button onClick={() => setSelectedTranscript(null)} className="p-2 hover:bg-secondary rounded-full transition-colors">
-                                <XCircle className="w-6 h-6 text-muted-foreground" />
-                            </button>
-                        </div>
-                        <div className="p-6 overflow-y-auto flex-1 text-foreground whitespace-pre-wrap leading-relaxed font-mono text-sm bg-secondary/10">
-                            {selectedTranscript.transcript || "No transcript available."}
-                        </div>
-                        <div className="p-6 border-t border-border bg-secondary/30 rounded-b-3xl">
-                            <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
-                                <Activity className="w-4 h-4 text-primary" />
-                                AI Summary
-                            </h4>
-                            <p className="text-sm text-muted-foreground leading-relaxed">{selectedTranscript.summary || "No summary available."}</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                {/* Left Column: Driver Management */}
-                <div className="lg:col-span-2 space-y-8">
-
-                    {/* Agent Selection Card */}
-                    <div className="glass-card rounded-2xl p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                                <User className="w-5 h-5 text-primary" />
-                                Active AI Agent
-                            </h2>
-                            <Link href="/agents" className="text-sm font-medium text-primary hover:underline flex items-center gap-1">
-                                Manage Agents
-                            </Link>
-                        </div>
-                        <div className="relative">
-                            <select
-                                value={activeAgentId}
-                                onChange={e => setActiveAgentId(e.target.value)}
-                                className="w-full px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none appearance-none cursor-pointer transition-all font-medium"
-                            >
-                                <option value="">Default (Priya - Trucking)</option>
-                                {Array.isArray(agents) && agents.map(a => (
-                                    <option key={a.id} value={a.id}>{a.name}</option>
-                                ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="glass-card p-6 rounded-2xl border border-border">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="p-3 bg-primary/10 rounded-xl text-primary">
+                                <Users className="w-6 h-6" />
                             </div>
-                        </div>
-                    </div>
-
-                    {/* Add Driver Card */}
-                    <div className="glass-card rounded-2xl p-6">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                                <Phone className="w-5 h-5 text-primary" />
-                                Add New Driver
-                            </h2>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={handleExport}
-                                    className="px-3 py-1.5 text-xs font-semibold bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors flex items-center gap-1.5"
-                                >
-                                    <Download className="w-3.5 h-3.5" /> Export CSV
-                                </button>
-                                <button
-                                    onClick={() => setImportModalOpen(true)}
-                                    className="px-3 py-1.5 text-xs font-semibold bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded-lg transition-colors flex items-center gap-1.5"
-                                >
-                                    <Upload className="w-3.5 h-3.5" /> Import Sheet
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Auto-Dialer Control */}
-                        <div className="mb-6 flex items-center justify-between bg-secondary/30 p-4 rounded-xl border border-border">
-                            <div>
-                                <h3 className="font-semibold text-foreground text-sm">Auto-Dialer</h3>
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                    {isAutoDialing
-                                        ? `Calling selected drivers (${selectedDriverIds.size} selected)...`
-                                        : `Select drivers to start auto-dialing`}
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => setIsAutoDialing(!isAutoDialing)}
-                                disabled={!isAutoDialing && selectedDriverIds.size === 0}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 shadow-sm ${isAutoDialing
-                                    ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20 border border-red-500/20'
-                                    : 'bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed'
-                                    }`}
-                            >
-                                {isAutoDialing ? (
-                                    <><XCircle className="w-4 h-4" /> Stop Dialing</>
-                                ) : (
-                                    <><Play className="w-4 h-4" /> Start Auto-Dialer ({selectedDriverIds.size})</>
-                                )}
-                            </button>
-                        </div>
-
-                        <form onSubmit={addDriver} className="flex flex-col sm:flex-row gap-4">
-                            <input
-                                type="text"
-                                placeholder="Driver Name"
-                                value={newDriver.name}
-                                onChange={e => setNewDriver({ ...newDriver, name: e.target.value })}
-                                className="flex-1 px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-                                required
-                            />
-                            <input
-                                type="tel"
-                                placeholder="Phone Number"
-                                value={newDriver.phone}
-                                onChange={e => setNewDriver({ ...newDriver, phone: e.target.value })}
-                                className="flex-1 px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-                                required
-                            />
-                            <button
-                                type="submit"
-                                className="px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 flex items-center justify-center gap-2 whitespace-nowrap"
-                            >
-                                Add Driver
-                            </button>
-                        </form>
-                    </div>
-
-                    {/* Active Queue Section - Conditionally Visible */}
-                    {(isAutoDialing || selectedDriverIds.size > 0) && (
-                        <div className="glass-card rounded-2xl overflow-hidden mb-8 border-2 border-primary/20 shadow-lg shadow-primary/10 animate-in slide-in-from-top-4 duration-300">
-                            <div className="p-4 border-b border-border flex justify-between items-center bg-primary/5">
-                                <h2 className="text-lg font-bold text-primary flex items-center gap-2">
-                                    <Play className="w-5 h-5" />
-                                    Active Call Queue
-                                </h2>
-                                <span className="px-3 py-1 rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                                    {selectedDriverIds.size} queued
-                                </span>
-                            </div>
-                            <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
-                                {drivers.filter(d => selectedDriverIds.has(d.id)).map(driver => (
-                                    <div key={driver.id} className="p-4 flex items-center justify-between hover:bg-secondary/30 transition-colors">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                                                {driver.name.charAt(0)}
-                                            </div>
-                                            <div>
-                                                <h3 className="font-semibold text-foreground text-sm">{driver.name}</h3>
-                                                <p className="text-xs text-muted-foreground">{driver.phone}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            {driver.status === 'calling' && (
-                                                <span className="text-xs font-bold text-blue-500 animate-pulse mr-2">Calling...</span>
-                                            )}
-                                            <button
-                                                onClick={() => toggleSelectDriver(driver.id)}
-                                                className="p-1.5 hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-lg transition-colors"
-                                                title="Remove from Queue"
-                                            >
-                                                <XCircle className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Driver Database Card */}
-                    <div className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-6 border-b border-border flex justify-between items-center bg-secondary/30">
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="checkbox"
-                                    checked={drivers.length > 0 && selectedDriverIds.size === drivers.length}
-                                    onChange={toggleSelectAll}
-                                    className="w-5 h-5 rounded border-border bg-background text-primary focus:ring-primary/20 transition-all cursor-pointer"
-                                />
-                                <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                                    <Clock className="w-5 h-5 text-primary" />
-                                    Driver Database
-                                </h2>
-                            </div>
-                            <span className="px-3 py-1 rounded-full bg-background border border-border text-xs font-bold text-muted-foreground">
-                                {drivers.length} total
+                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-green-500/10 text-green-600">
+                                Active
                             </span>
                         </div>
-                        <div className="divide-y divide-border">
-                            {Array.isArray(drivers) && drivers.map(driver => (
-                                <div key={driver.id} className={`p-5 flex items-center justify-between hover:bg-secondary/30 transition-colors group ${selectedDriverIds.has(driver.id) ? 'bg-primary/5' : ''}`}>
-                                    <div className="flex items-center gap-4">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedDriverIds.has(driver.id)}
-                                            onChange={() => toggleSelectDriver(driver.id)}
-                                            className="w-5 h-5 rounded border-border bg-background text-primary focus:ring-primary/20 transition-all cursor-pointer"
-                                        />
-                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center text-primary font-bold text-lg">
-                                            {driver.name.charAt(0)}
-                                        </div>
-                                        <div>
-                                            <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{driver.name}</h3>
-                                            <p className="text-sm text-muted-foreground">{driver.phone}</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        {driver.status === 'completed' ? (
-                                            <div className="flex gap-3 items-center">
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-green-500/10 text-green-600 border border-green-500/20">
-                                                    <CheckCircle className="w-3.5 h-3.5" /> Qualified
-                                                </span>
-                                                {driver.calls && driver.calls.length > 0 && (
-                                                    <button
-                                                        onClick={() => setSelectedTranscript(driver.calls[0])}
-                                                        className="text-xs font-semibold text-primary hover:underline"
-                                                    >
-                                                        View Transcript
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ) : driver.status === 'calling' ? (
-                                            <div className="flex items-center gap-2">
-                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 border border-blue-500/20 animate-pulse">
-                                                    <Phone className="w-3.5 h-3.5" /> In Call
-                                                </span>
-                                                <button
-                                                    onClick={async () => {
-                                                        if (driver.calls && driver.calls.length > 0) {
-                                                            const callId = driver.calls[0].id;
-                                                            try {
-                                                                await fetch(`/api/calls/${callId}/sync`, { method: 'POST' });
-                                                                fetchDrivers(); // Refresh list
-                                                            } catch (e) {
-                                                                console.error('Sync failed', e);
-                                                            }
-                                                        }
-                                                    }}
-                                                    className="text-xs bg-secondary hover:bg-secondary/80 px-2 py-1 rounded text-muted-foreground transition-colors"
-                                                    title="Sync Status (Use on Localhost)"
-                                                >
-                                                    🔄 Sync
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                onClick={() => startCall(driver.id)}
-                                                disabled={activeCall !== null}
-                                                className="inline-flex items-center gap-2 px-4 py-2 bg-foreground text-background rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg"
-                                            >
-                                                <Phone className="w-4 h-4" /> Call Now
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                            {drivers.length === 0 && (
-                                <div className="p-12 text-center text-muted-foreground">
-                                    <div className="w-16 h-16 bg-secondary/50 rounded-full flex items-center justify-center mx-auto mb-4">
-                                        <User className="w-8 h-8 opacity-50" />
-                                    </div>
-                                    <p className="font-medium">No drivers in database</p>
-                                    <p className="text-sm opacity-70">Add a driver to get started</p>
-                                </div>
-                            )}
+                        <h3 className="text-3xl font-bold text-foreground mb-1">{stats.totalDrivers}</h3>
+                        <p className="text-sm text-muted-foreground">Total Drivers</p>
+                    </div>
+
+                    <div className="glass-card p-6 rounded-2xl border border-border">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="p-3 bg-blue-500/10 rounded-xl text-blue-600">
+                                <Phone className="w-6 h-6" />
+                            </div>
+                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-blue-500/10 text-blue-600">
+                                Total
+                            </span>
                         </div>
+                        <h3 className="text-3xl font-bold text-foreground mb-1">{stats.totalCalls}</h3>
+                        <p className="text-sm text-muted-foreground">Total Calls Made</p>
+                    </div>
+
+                    <div className="glass-card p-6 rounded-2xl border border-border">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="p-3 bg-green-500/10 rounded-xl text-green-600">
+                                <Activity className="w-6 h-6" />
+                            </div>
+                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-green-500/10 text-green-600">
+                                Success
+                            </span>
+                        </div>
+                        <h3 className="text-3xl font-bold text-foreground mb-1">{stats.completedCalls}</h3>
+                        <p className="text-sm text-muted-foreground">Completed Interviews</p>
+                    </div>
+
+                    <div className="glass-card p-6 rounded-2xl border border-border">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="p-3 bg-red-500/10 rounded-xl text-red-600">
+                                <Activity className="w-6 h-6" />
+                            </div>
+                            <span className="text-xs font-bold px-2 py-1 rounded-lg bg-red-500/10 text-red-600">
+                                Failed
+                            </span>
+                        </div>
+                        <h3 className="text-3xl font-bold text-foreground mb-1">{stats.failedCalls}</h3>
+                        <p className="text-sm text-muted-foreground">Failed / No Answer</p>
                     </div>
                 </div>
 
-                {/* Right Column: Live Status & Results */}
-                <div className="space-y-8 sticky top-6">
-                    {/* Live Call Status */}
-                    <div className="glass-card rounded-2xl overflow-hidden h-[500px] flex flex-col">
-                        <div className="p-4 border-b border-border bg-secondary/30">
-                            <h2 className="text-sm font-bold text-foreground flex items-center gap-2 uppercase tracking-wider">
-                                <div className={`w-2 h-2 rounded-full ${activeCall ? 'bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-muted-foreground'}`}></div>
-                                Live Call Transcript
-                            </h2>
-                        </div>
-                        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-background/50 scrollbar-thin scrollbar-thumb-border">
-                            {activeCall ? (
-                                activeCall.logs.map((log: string, i: number) => (
-                                    <div key={i} className={`flex ${log.startsWith('Agent:') ? 'justify-start' : log.startsWith('Driver:') ? 'justify-end' : 'justify-center'}`}>
-                                        <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${log.startsWith('Agent:')
-                                            ? 'bg-white dark:bg-gray-800 text-foreground rounded-tl-none border border-border'
-                                            : log.startsWith('Driver:')
-                                                ? 'bg-primary text-primary-foreground rounded-tr-none'
-                                                : 'bg-transparent shadow-none text-muted-foreground text-xs py-1 font-mono'
-                                            }`}>
-                                            {log.replace(/^(Agent:|Driver:|System:)\s*/, '')}
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
-                                    <div className="w-20 h-20 rounded-full bg-secondary/50 flex items-center justify-center animate-pulse">
-                                        <Phone className="w-10 h-10 opacity-20" />
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="font-medium text-foreground">Ready to make calls</p>
-                                        <p className="text-sm opacity-70">Initiate a call to see live transcript</p>
-                                    </div>
+                {/* Quick Actions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Link href="/drivers" className="group">
+                        <div className="glass-card p-8 rounded-2xl border border-border hover:border-primary/50 transition-all h-full flex flex-col justify-between">
+                            <div>
+                                <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary mb-6 group-hover:scale-110 transition-transform">
+                                    <Users className="w-6 h-6" />
                                 </div>
-                            )}
+                                <h3 className="text-xl font-bold text-foreground mb-2">Manage Drivers</h3>
+                                <p className="text-muted-foreground">Add new drivers, import from Google Sheets, and manage your contact list.</p>
+                            </div>
+                            <div className="mt-8 flex items-center gap-2 text-primary font-bold text-sm">
+                                Go to Drivers <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                            </div>
                         </div>
-                    </div>
+                    </Link>
 
-                    {/* Interview Results Preview */}
-                    <div className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-4 border-b border-border bg-secondary/30">
-                            <h2 className="text-sm font-bold text-foreground flex items-center gap-2 uppercase tracking-wider">
-                                <FileText className="w-4 h-4" /> Recent Results
-                            </h2>
-                        </div>
-                        <div className="p-4 max-h-[400px] overflow-y-auto">
-                            {drivers.filter(d => d.status === 'completed').length > 0 ? (
-                                <div className="space-y-4">
-                                    {drivers.filter(d => d.status === 'completed').map(driver => (
-                                        <div key={driver.id} className="border border-border rounded-xl p-4 hover:border-primary/50 transition-colors bg-secondary/10">
-                                            <h4 className="font-bold text-sm text-foreground mb-3 flex items-center gap-2">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                                                {driver.name}
-                                            </h4>
-                                            <div className="space-y-3">
-                                                {driver.responses && Object.entries(driver.responses).map(([key, value]) => (
-                                                    <div key={key} className="text-sm group">
-                                                        <span className="text-muted-foreground text-xs block mb-0.5 font-medium group-hover:text-primary transition-colors">
-                                                            {TRUCK_DRIVER_AGENT_CONFIG.questions.find(q => q.id === key)?.text}
-                                                        </span>
-                                                        <span className="text-foreground pl-2 border-l-2 border-primary/20 block">
-                                                            {String(value)}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
+                    <Link href="/calls" className="group">
+                        <div className="glass-card p-8 rounded-2xl border border-border hover:border-primary/50 transition-all h-full flex flex-col justify-between">
+                            <div>
+                                <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-600 mb-6 group-hover:scale-110 transition-transform">
+                                    <FileText className="w-6 h-6" />
                                 </div>
-                            ) : (
-                                <p className="text-sm text-muted-foreground text-center py-8">
-                                    No completed interviews yet
-                                </p>
-                            )}
+                                <h3 className="text-xl font-bold text-foreground mb-2">Call History & Transcripts</h3>
+                                <p className="text-muted-foreground">View past calls, listen to recordings, and read live transcripts.</p>
+                            </div>
+                            <div className="mt-8 flex items-center gap-2 text-blue-600 font-bold text-sm">
+                                View History <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                            </div>
                         </div>
-                    </div>
+                    </Link>
                 </div>
             </div>
         </Layout>

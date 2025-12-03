@@ -30,6 +30,13 @@ export async function sendBlandCall(phoneNumber: string, task: string, model: st
         language: language,
         voice: 'nat',
         record: true,
+        transcribe: true,
+        summary: true,
+        analysis_schema: {
+            "summary": "Summarize the call in 2-3 sentences.",
+            "transcript": "Full transcript of the call.",
+            "user_answers": "Extract the user's answers to the questions asked."
+        },
         metadata: {}
     };
 

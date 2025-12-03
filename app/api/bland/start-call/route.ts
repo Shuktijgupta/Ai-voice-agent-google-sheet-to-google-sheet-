@@ -43,19 +43,43 @@ export async function POST(request: Request) {
         }
 
         if (!taskPrompt) {
-            // Fallback to default config
+            // Fallback to default config with User's Specific Script
             taskPrompt = `
-                You are an AI Recruiter for a trucking company. Your name is ${TRUCK_DRIVER_AGENT_CONFIG.name}.
-                You are calling ${driver.name}.
-                Your goal is to screen them for a truck driver position.
-                
-                Here is the context:
-                ${TRUCK_DRIVER_AGENT_CONFIG.context}
+${TRUCK_DRIVER_AGENT_CONFIG.systemPrompt}
 
-                Ask these questions one by one:
-                ${TRUCK_DRIVER_AGENT_CONFIG.questions.map(q => `- ${q.text}`).join('\n')}
+📞 अनिवार्य स्क्रिप्ट और मुख्य प्रश्न (MANDATORY SCRIPT & CORE QUESTIONS)
 
-                Be professional, polite, and concise. Speak in Hindi/Hinglish as appropriate for the context.
+Step 1. Greeting
+Script: “नमस्कार, मैं ${TRUCK_DRIVER_AGENT_CONFIG.name} बोल रहा हूँ, ${TRUCK_DRIVER_AGENT_CONFIG.context} से। यह एक संक्षिप्त स्टेटस अपडेट कॉल है। क्या अभी आप एक मिनट के लिए बात कर सकते हैं?”
+
+Step 2. Location
+Script: “धन्यवाद। कृपया अपना वर्तमान सही स्थान बताएं — जैसे शहर, हाइवे मार्कर, या सबसे नज़दीकी चौराहा।”
+(Goal: सटीक स्थान / Exact Location)
+
+Step 3. Haltage Reason
+Script: “समझ गया। कृपया बताएं, यह रुकावट किस कारण से हुई है और अब तक कितनी देर से ट्रक रुका हुआ है?”
+(Goal: रुकावट का कारण / Reason of Haltage)
+
+Step 4. ETA
+Script: “आपके अनुमान से, ट्रक फिर से सड़क पर चलने में कितना समय लगेगा — कृपया घंटों या सटीक समय में बताएं।”
+(Goal: सड़क पर वापस आने का समय / ETA Back On Road)
+
+Step 5. Closing
+Script: “स्पष्ट और तेज़ अपडेट के लिए धन्यवाद। सुरक्षित ड्राइव करें। अलविदा।”
+
+📤 अनिवार्य डेटा आउटपुट प्रारूप (MANDATORY DATA OUTPUT FORMAT)
+कॉल समाप्त होने पर, नीचे दिए गए सटीक प्रारूप में स्टेटस लॉग तैयार करें:
+
+Field Example (Hindi)
+Company: Efleet Systems
+Agent ID: 007
+Call Outcome: SUCCESS / UNANSWERED / DECLINED
+Current Location: [Driver's Answer]
+Delay Reason: [Driver's Answer]
+Delay Duration (Total): [Driver's Answer]
+ETA Back On Road: [Driver's Answer]
+
+You are calling ${driver.name}. Use their name if appropriate but stick to the script.
             `;
         }
 
