@@ -75,7 +75,10 @@ export async function POST(request: Request) {
                 summary: summary || null,
                 recordingUrl: recording_url || null,
                 durationSeconds: call_length ? Math.round(call_length) : null,
-                endTime: new Date(),
+                // Only set endTime when call is completed or failed (consistent with other providers)
+                endTime: (finalStatus === 'completed' || finalStatus === 'failed' || finalStatus === 'no-answer') 
+                    ? new Date() 
+                    : call.endTime,
                 answeredBy: answered_by || null,
                 price: price || null,
                 analysis: analysis ? JSON.stringify(analysis) : null,

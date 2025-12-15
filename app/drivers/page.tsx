@@ -285,7 +285,7 @@ export default function DriversPage() {
                     .filter((d: any) => d.status === 'new')
                     .map((d: any) => d.id);
                 setSelectedDriverIds(new Set(newDriverIds));
-                setIsAutoDialing(true);
+                startAutoDialing();
             } else {
                 alert(`Import failed: ${data.error}`);
             }
