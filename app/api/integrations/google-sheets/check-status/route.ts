@@ -3,11 +3,28 @@ import { prisma } from '@/lib/prisma';
 import { updateSheetRow } from '@/lib/google-sheets';
 import { getCallDetails } from '@/lib/bland';
 
-const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+const BLAND_API_KEY = process.env.BLAND_API_KEY;
+const GOOGLE_SHEETS_EMAIL = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+const GOOGLE_SHEETS_KEY = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
 
+// GET: Check if integrations are configured
+export async function GET() {
+    const googleSheetsConfigured = !!(SPREADSHEET_ID && GOOGLE_SHEETS_EMAIL && GOOGLE_SHEETS_KEY && GOOGLE_SHEETS_KEY !== 'your-google-sheets-private-key');
+    const blandConfigured = !!(BLAND_API_KEY && BLAND_API_KEY !== 'your-bland-api-key');
+
+    return NextResponse.json({
+        connected: googleSheetsConfigured,
+        blandConfigured,
+        sheetId: SPREADSHEET_ID || null,
+        googleSheetsEmail: GOOGLE_SHEETS_EMAIL ? `${GOOGLE_SHEETS_EMAIL.substring(0, 20)}...` : null
+    });
+}
+
+// POST: Update call statuses from Bland AI
 export async function POST() {
     if (!SPREADSHEET_ID) {
-        return NextResponse.json({ error: 'GOOGLE_SHEET_ID is not set' }, { status: 500 });
+        return NextResponse.json({ error: 'GOOGLE_SHEETS_SPREADSHEET_ID is not set' }, { status: 500 });
     }
 
     try {

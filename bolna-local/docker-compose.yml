@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  bolna-app:
+    image: bolnadev/bolna-app:latest
+    container_name: bolna_app
+    ports:
+      - "5001:5001"
+    environment:
+      # LLM - Ollama (runs on host machine)
+      - OLLAMA_HOST=host.docker.internal:11434
+      
+      # Deepgram for ASR (get free key at console.deepgram.com)
+      - DEEPGRAM_AUTH_TOKEN=${DEEPGRAM_AUTH_TOKEN}
+      
+      # ElevenLabs for TTS (optional - uses your existing key)
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      
+      # OpenAI for TTS alternative
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Twilio for phone calls
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      
+      # Redis for caching
+      - REDIS_URL=redis://redis:6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    container_name: bolna_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # Uncomment below for local XTTS (free TTS)
+  # xtts-server:
+  #   image: ghcr.io/coqui-ai/xtts-streaming-server:latest
+  #   container_name: xtts_server
+  #   ports:
+  #     - "8000:8000"
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]

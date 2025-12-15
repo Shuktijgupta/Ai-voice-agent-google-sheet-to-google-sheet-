@@ -1,9 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Layout from '@/components/Layout';
-import { Phone, CheckCircle, Play, FileText, User, XCircle, Upload, Download, Activity, Clock, RefreshCw } from 'lucide-react';
+import { Button3D } from '@/components/Button3D';
+import { CallDialer } from '@/components/CallDialer';
+import { 
+    Phone, CheckCircle, Play, FileText, User, XCircle, Upload, Download, 
+    Activity, Clock, RefreshCw, Search, Filter, Trash2, MoreVertical,
+    ChevronDown, X, AlertTriangle, Zap, UserPlus, Square, PhoneCall
+} from 'lucide-react';
 import { TRUCK_DRIVER_AGENT_CONFIG } from '@/lib/ai-agent-config';
+import { useSyncStore, useClickToCallStore } from '@/lib/store';
 import Link from 'next/link';
 
 interface ActiveCall {
@@ -11,6 +18,8 @@ interface ActiveCall {
     currentQuestionIndex: number;
     logs: string[];
 }
+
+type StatusFilter = 'all' | 'new' | 'calling' | 'completed' | 'failed';
 
 export default function DriversPage() {
     const [drivers, setDrivers] = useState<any[]>([]);
@@ -20,18 +29,65 @@ export default function DriversPage() {
     const [importing, setImporting] = useState(false);
     const [newDriver, setNewDriver] = useState({ name: '', phone: '' });
     const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
-    const [isAutoDialing, setIsAutoDialing] = useState(false);
-    const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
     const [editingDriver, setEditingDriver] = useState<any>(null);
     const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
 
     const [agents, setAgents] = useState<any[]>([]);
     const [selectedAgentId, setSelectedAgentId] = useState<string>('');
 
-    // Sync State
-    const [isSyncing, setIsSyncing] = useState(false);
-    const [isAutoSyncing, setIsAutoSyncing] = useState(false);
-    const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+    // Search & Filter State
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [showFilters, setShowFilters] = useState(false);
+
+    // Bulk Actions State
+    const [showBulkActions, setShowBulkActions] = useState(false);
+    const [bulkDeleting, setBulkDeleting] = useState(false);
+
+    // Global Sync & Dialer State from Zustand
+    const {
+        isAutoSyncing,
+        isSyncing,
+        lastSyncTime,
+        isAutoDialing,
+        selectedDriverIds,
+        startAutoSync,
+        stopAutoSync,
+        setSyncing,
+        setLastSyncTime,
+        startAutoDialing,
+        stopAutoDialing,
+        setSelectedDriverIds,
+        clearSelectedDrivers,
+    } = useSyncStore();
+
+    // Click-to-Call State
+    const {
+        isConfigured: isClickToCallConfigured,
+        isDialerOpen,
+        activeCall: clickToCallActive,
+        initiateCall,
+        openDialer,
+        setConfiguration,
+    } = useClickToCallStore();
+
+    // Fetch click-to-call configuration
+    useEffect(() => {
+        const fetchClickToCallConfig = async () => {
+            try {
+                const res = await fetch('/api/click-to-call/config');
+                const data = await res.json();
+                setConfiguration({
+                    isConfigured: data.configured,
+                    virtualNumber: data.virtualNumber,
+                    agentNumber: data.agentNumber,
+                });
+            } catch (error) {
+                console.error('Failed to fetch click-to-call config:', error);
+            }
+        };
+        fetchClickToCallConfig();
+    }, [setConfiguration]);
 
     const fetchDrivers = async () => {
         try {
@@ -65,6 +121,33 @@ export default function DriversPage() {
         fetchAgents();
     }, []);
 
+    // Filtered Drivers
+    const filteredDrivers = useMemo(() => {
+        return drivers.filter(driver => {
+            // Search filter
+            const matchesSearch = searchQuery === '' || 
+                driver.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                driver.phone.includes(searchQuery) ||
+                (driver.email && driver.email.toLowerCase().includes(searchQuery.toLowerCase()));
+            
+            // Status filter
+            const matchesStatus = statusFilter === 'all' || driver.status === statusFilter;
+            
+            return matchesSearch && matchesStatus;
+        });
+    }, [drivers, searchQuery, statusFilter]);
+
+    // Stats for filters
+    const statusCounts = useMemo(() => {
+        return {
+            all: drivers.length,
+            new: drivers.filter(d => d.status === 'new').length,
+            calling: drivers.filter(d => d.status === 'calling').length,
+            completed: drivers.filter(d => d.status === 'completed').length,
+            failed: drivers.filter(d => d.status === 'failed' || d.status === 'no-answer').length,
+        };
+    }, [drivers]);
+
     const handleDeleteDriver = async (id: string) => {
         if (!confirm('Are you sure you want to delete this driver? This will also delete all associated call logs.')) return;
 
@@ -83,6 +166,50 @@ export default function DriversPage() {
         } catch (error) {
             console.error('Failed to delete driver:', error);
             alert('Error deleting driver');
+        }
+    };
+
+    // Bulk Delete
+    const handleBulkDelete = async () => {
+        if (selectedDriverIds.size === 0) return;
+        if (!confirm(`Are you sure you want to delete ${selectedDriverIds.size} driver(s)? This cannot be undone.`)) return;
+
+        setBulkDeleting(true);
+        try {
+            const deletePromises = Array.from(selectedDriverIds).map(id =>
+                fetch(`/api/drivers/${id}`, { method: 'DELETE' })
+            );
+            await Promise.all(deletePromises);
+            setDrivers(prev => prev.filter(d => !selectedDriverIds.has(d.id)));
+            setSelectedDriverIds(new Set());
+            setShowBulkActions(false);
+        } catch (error) {
+            console.error('Bulk delete failed:', error);
+            alert('Some deletions failed. Please try again.');
+        } finally {
+            setBulkDeleting(false);
+        }
+    };
+
+    // Bulk Status Change
+    const handleBulkStatusChange = async (newStatus: string) => {
+        if (selectedDriverIds.size === 0) return;
+
+        try {
+            const updatePromises = Array.from(selectedDriverIds).map(id =>
+                fetch(`/api/drivers/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus })
+                })
+            );
+            await Promise.all(updatePromises);
+            setDrivers(prev => prev.map(d => 
+                selectedDriverIds.has(d.id) ? { ...d, status: newStatus } : d
+            ));
+            setShowBulkActions(false);
+        } catch (error) {
+            console.error('Bulk status change failed:', error);
         }
     };
 
@@ -154,7 +281,6 @@ export default function DriversPage() {
                 setSheetUrl('');
                 const updatedDrivers = await fetchDrivers();
 
-                // Select all new drivers and start dialing
                 const newDriverIds = updatedDrivers
                     .filter((d: any) => d.status === 'new')
                     .map((d: any) => d.id);
@@ -203,30 +329,32 @@ export default function DriversPage() {
 
     const startCall = async (driverId: string) => {
         try {
-            // Optimistic update
             await updateDriverStatus(driverId, 'calling');
 
             setActiveCall({
                 driverId,
                 currentQuestionIndex: 0,
-                logs: [`System: Initiating call via Bland AI...`]
+                logs: [`System: Initiating AI call...`]
             });
 
-            const res = await fetch('/api/bland/start-call', {
+            // Use unified AI call API - automatically routes to the selected provider
+            const res = await fetch('/api/ai-call/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     driverId,
-                    agentId: selectedAgentId // Pass selected agent
+                    agentId: selectedAgentId
                 }),
             });
 
+            const data = await res.json();
+            
             if (!res.ok) {
-                const error = await res.json();
-                setActiveCall(prev => prev ? { ...prev, logs: [...prev.logs, `Error: ${error.error}`] } : null);
-                await updateDriverStatus(driverId, 'new'); // Revert status
+                setActiveCall(prev => prev ? { ...prev, logs: [...prev.logs, `Error: ${data.error}`] } : null);
+                await updateDriverStatus(driverId, 'new');
             } else {
-                setActiveCall(prev => prev ? { ...prev, logs: [...prev.logs, `System: Call initiated successfully. Waiting for connection...`] } : null);
+                const providerName = data.provider === 'elevenlabs' ? 'ElevenLabs' : 'Bland AI';
+                setActiveCall(prev => prev ? { ...prev, logs: [...prev.logs, `System: Call initiated via ${providerName}. Waiting for connection...`] } : null);
             }
         } catch (error) {
             console.error('Failed to start call:', error);
@@ -234,72 +362,81 @@ export default function DriversPage() {
         }
     };
 
-    // Auto-Dialer Logic
-    useEffect(() => {
-        let interval: NodeJS.Timeout;
-
-        if (isAutoDialing) {
-            interval = setInterval(async () => {
-                const currentDrivers = await fetchDrivers();
-
-                // Check if any call is currently active
-                const activeCall = currentDrivers.find((d: any) => d.status === 'calling');
-                if (activeCall) return; // Wait for current call to finish
-
-                // Find next new driver THAT IS SELECTED
-                const nextDriver = currentDrivers.find((d: any) => d.status === 'new' && selectedDriverIds.has(d.id));
-
-                if (nextDriver) {
-                    console.log(`Auto-Dialer: Starting call for ${nextDriver.name}`);
-                    startCall(nextDriver.id);
-                } else {
-                    // No new drivers left in selection
-                    setIsAutoDialing(false);
-                    alert('Auto-Dialer: All selected calls completed!');
-                }
-            }, 5000); // Check every 5 seconds
+    // Click-to-Call (Manual call through virtual number)
+    const startClickToCall = async (driver: any) => {
+        if (clickToCallActive) {
+            alert('A call is already in progress. Please end it first.');
+            return;
         }
 
-        return () => clearInterval(interval);
-    }, [isAutoDialing, selectedDriverIds]);
+        try {
+            const res = await fetch('/api/click-to-call/initiate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    driverId: driver.id,
+                    customerNumber: driver.phone,
+                }),
+                    });
 
-    // Sync Logic
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                // Update local driver status
+                setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, status: 'calling' } : d));
+                
+                // Initialize call in store
+                initiateCall({
+                    callId: data.callId,
+                    dbCallId: data.dbCallId,
+                    driverId: driver.id,
+                    driverName: driver.name,
+                    customerNumber: driver.phone,
+                    status: 'initiating',
+                    startTime: new Date(),
+                });
+            } else {
+                alert(`Failed to initiate call: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+            console.error('Click-to-call error:', error);
+            alert('Failed to initiate click-to-call');
+        }
+    };
+
+    // Manual Sync (one-time sync button)
     const handleSync = async () => {
         if (isSyncing) return;
-        setIsSyncing(true);
+        setSyncing(true);
         try {
             const res = await fetch('/api/integrations/google-sheets/sync', { method: 'POST' });
             const data = await res.json();
             if (res.ok) {
                 setLastSyncTime(new Date());
-                await fetchDrivers(); // Refresh list
+                await fetchDrivers();
                 console.log('Sync complete:', data);
             } else {
                 console.error('Sync failed:', data.error);
-                // Optional: alert('Sync failed: ' + data.error);
             }
         } catch (error) {
             console.error('Sync error:', error);
         } finally {
-            setIsSyncing(false);
+            setSyncing(false);
         }
     };
 
-    // Auto-Sync Effect
+    // Refresh drivers when auto-sync completes (listen to lastSyncTime changes)
     useEffect(() => {
-        let interval: NodeJS.Timeout;
-        if (isAutoSyncing) {
-            handleSync(); // Sync immediately on enable
-            interval = setInterval(handleSync, 30000); // Every 30 seconds
+        if (lastSyncTime) {
+            fetchDrivers();
         }
-        return () => clearInterval(interval);
-    }, [isAutoSyncing]);
+    }, [lastSyncTime]);
 
     const toggleSelectAll = () => {
-        if (selectedDriverIds.size === drivers.length) {
-            setSelectedDriverIds(new Set());
+        if (selectedDriverIds.size === filteredDrivers.length) {
+            clearSelectedDrivers();
         } else {
-            setSelectedDriverIds(new Set(drivers.map(d => d.id)));
+            setSelectedDriverIds(new Set(filteredDrivers.map(d => d.id)));
         }
     };
 
@@ -314,14 +451,12 @@ export default function DriversPage() {
     };
 
     const handleExport = () => {
-        // Generate CSV
         const headers = ['Name', 'Phone', 'Status', 'Transcript', 'Summary', 'Answers'];
         const rows = drivers.map(d => {
             const transcript = d.calls && d.calls.length > 0 ? d.calls[0].transcript || '' : '';
             const summary = d.calls && d.calls.length > 0 ? d.calls[0].summary || '' : '';
             const answers = d.responses ? JSON.stringify(d.responses) : '';
 
-            // Escape quotes for CSV
             const escape = (str: string) => `"${String(str).replace(/"/g, '""')}"`;
 
             return [
@@ -346,12 +481,21 @@ export default function DriversPage() {
         document.body.removeChild(link);
     };
 
+    // Clear selection when filters change
+    useEffect(() => {
+        clearSelectedDrivers();
+    }, [searchQuery, statusFilter, clearSelectedDrivers]);
+
     if (loading) return (
         <Layout>
-            <div className="min-h-screen flex items-center justify-center">
+            <div className="min-h-[80vh] flex flex-col items-center justify-center gap-4">
                 <div className="relative">
-                    <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin"></div>
+                    <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin"></div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <User className="w-6 h-6 text-primary animate-pulse" />
                 </div>
+                </div>
+                <p className="text-muted-foreground animate-pulse">Loading drivers...</p>
             </div>
         </Layout>
     );
@@ -402,12 +546,9 @@ export default function DriversPage() {
                                 />
                             </div>
                             <div className="pt-2">
-                                <button
-                                    type="submit"
-                                    className="w-full py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl transition-all shadow-lg shadow-primary/25"
-                                >
+                                <Button3D type="submit" variant="primary" fullWidth>
                                     Save Changes
-                                </button>
+                                </Button3D>
                             </div>
                         </form>
                     </div>
@@ -440,21 +581,12 @@ export default function DriversPage() {
                                 required
                             />
                             <div className="grid grid-cols-2 gap-3">
-                                <button
-                                    type="submit"
-                                    disabled={importing}
-                                    className="w-full py-3 bg-secondary hover:bg-secondary/80 text-foreground font-medium rounded-xl transition-all flex items-center justify-center gap-2"
-                                >
+                                <Button3D type="submit" variant="secondary" disabled={importing} fullWidth>
                                     {importing ? 'Importing...' : 'Import Only'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleImportAndCall}
-                                    disabled={importing}
-                                    className="w-full py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-xl transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 flex items-center justify-center gap-2"
-                                >
+                                </Button3D>
+                                <Button3D type="button" variant="primary" onClick={handleImportAndCall} disabled={importing} fullWidth>
                                     {importing ? 'Importing...' : 'Import & Call'}
-                                </button>
+                                </Button3D>
                             </div>
                         </form>
                     </div>
@@ -488,59 +620,89 @@ export default function DriversPage() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                {/* Left Column: Driver Management */}
-                <div className="lg:col-span-2 space-y-8">
-
-                    {/* Add Driver Card */}
-                    <div className="glass-card rounded-2xl p-6">
-                        <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                                <Phone className="w-5 h-5 text-primary" />
-                                Add New Driver
-                            </h2>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setIsAutoSyncing(!isAutoSyncing)}
-                                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${isAutoSyncing
-                                        ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/25'
-                                        : 'bg-purple-500/10 text-purple-600 hover:bg-purple-500/20'
-                                        }`}
+            <div className="space-y-6">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h1 className="text-3xl font-bold text-foreground tracking-tight">Drivers</h1>
+                        <p className="text-muted-foreground mt-1">Manage contacts and start AI voice calls</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Button3D 
+                            size="sm" 
+                            variant={isAutoSyncing ? "warning" : "secondary"}
+                            onClick={() => isAutoSyncing ? stopAutoSync() : startAutoSync()}
                                 >
                                     <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin' : ''}`} />
                                     {isAutoSyncing ? 'Auto-Sync On' : 'Auto-Sync'}
-                                </button>
-                                <button
-                                    onClick={handleSync}
-                                    disabled={isSyncing}
-                                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${isSyncing ? 'bg-blue-500/10 text-blue-600' : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
-                                        }`}
-                                >
+                        </Button3D>
+                        <Button3D size="sm" variant="primary" onClick={handleSync} disabled={isSyncing}>
                                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                                     {isSyncing ? 'Syncing...' : 'Sync Sheet'}
-                                </button>
+                        </Button3D>
+                        <Button3D size="sm" variant="secondary" onClick={handleExport}>
+                            <Download className="w-3.5 h-3.5" /> Export
+                        </Button3D>
+                        <Button3D size="sm" variant="success" onClick={() => setImportModalOpen(true)}>
+                            <Upload className="w-3.5 h-3.5" /> Import
+                        </Button3D>
+                    </div>
+                </div>
+
+                {/* Search, Filter & Actions Bar */}
+                <div className="glass-card p-4 rounded-2xl border border-border space-y-4">
+                    <div className="flex flex-col md:flex-row gap-4">
+                        {/* Search */}
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                            <input
+                                type="text"
+                                placeholder="Search by name, phone, or email..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pl-10 pr-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+                            />
+                            {searchQuery && (
                                 <button
-                                    onClick={handleExport}
-                                    className="px-3 py-1.5 text-xs font-semibold bg-secondary hover:bg-secondary/80 text-foreground rounded-lg transition-colors flex items-center gap-1.5"
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-secondary rounded-full"
                                 >
-                                    <Download className="w-3.5 h-3.5" /> Export CSV
+                                    <X className="w-4 h-4 text-muted-foreground" />
                                 </button>
+                            )}
+                        </div>
+
+                        {/* Filter Buttons */}
+                        <div className="flex gap-2">
+                            {(['all', 'new', 'calling', 'completed', 'failed'] as StatusFilter[]).map((status) => (
                                 <button
-                                    onClick={() => setImportModalOpen(true)}
-                                    className="px-3 py-1.5 text-xs font-semibold bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded-lg transition-colors flex items-center gap-1.5"
+                                    key={status}
+                                    onClick={() => setStatusFilter(status)}
+                                    className={`px-3 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 capitalize ${
+                                        statusFilter === status
+                                            ? status === 'completed' ? 'bg-green-500 text-white' :
+                                              status === 'failed' ? 'bg-red-500 text-white' :
+                                              status === 'calling' ? 'bg-blue-500 text-white' :
+                                              status === 'new' ? 'bg-yellow-500 text-white' :
+                                              'bg-primary text-primary-foreground'
+                                            : 'bg-secondary/50 text-muted-foreground hover:bg-secondary border border-border'
+                                    }`}
                                 >
-                                    <Upload className="w-3.5 h-3.5" /> Import Sheet
+                                    {status} ({statusCounts[status]})
                                 </button>
+                            ))}
                             </div>
                         </div>
 
+                    {/* Bulk Actions & Agent Selection */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pt-2 border-t border-border">
                         {/* Agent Selection */}
-                        <div className="mb-6">
-                            <label className="text-sm font-medium text-muted-foreground mb-2 block">Select Calling Agent</label>
+                        <div className="flex items-center gap-3">
+                            <Zap className="w-4 h-4 text-primary" />
                             <select
                                 value={selectedAgentId}
                                 onChange={(e) => setSelectedAgentId(e.target.value)}
-                                className="w-full px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                                className="px-4 py-2 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all text-sm"
                             >
                                 <option value="">Default Agent (Agent 007)</option>
                                 {agents.map(agent => (
@@ -551,32 +713,73 @@ export default function DriversPage() {
                             </select>
                         </div>
 
-                        {/* Auto-Dialer Control */}
-                        <div className="mb-6 flex items-center justify-between bg-secondary/30 p-4 rounded-xl border border-border">
-                            <div>
-                                <h3 className="font-semibold text-foreground text-sm">Auto-Dialer</h3>
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                    {isAutoDialing
-                                        ? `Calling selected drivers (${selectedDriverIds.size} selected)...`
-                                        : `Select drivers to start auto-dialing`}
-                                </p>
-                            </div>
+                        {/* Bulk Actions */}
+                        {selectedDriverIds.size > 0 && (
+                            <div className="flex items-center gap-3 animate-in slide-in-from-right-5 duration-200">
+                                <span className="text-sm text-muted-foreground">
+                                    {selectedDriverIds.size} selected
+                                </span>
+                                <div className="relative">
                             <button
-                                onClick={() => setIsAutoDialing(!isAutoDialing)}
-                                disabled={!isAutoDialing && selectedDriverIds.size === 0}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 shadow-sm ${isAutoDialing
-                                    ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20 border border-red-500/20'
-                                    : 'bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed'
-                                    }`}
+                                        onClick={() => setShowBulkActions(!showBulkActions)}
+                                        className="px-4 py-2 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl transition-colors flex items-center gap-2 text-sm font-medium border border-border"
+                                    >
+                                        <MoreVertical className="w-4 h-4" />
+                                        Bulk Actions
+                                        <ChevronDown className="w-4 h-4" />
+                                    </button>
+                                    
+                                    {showBulkActions && (
+                                        <div className="absolute right-0 top-full mt-2 w-48 bg-background rounded-xl border border-border shadow-xl z-50 overflow-hidden animate-in slide-in-from-top-2 duration-200">
+                                            <button
+                                                onClick={() => handleBulkStatusChange('new')}
+                                                className="w-full px-4 py-3 text-left text-sm hover:bg-secondary/50 transition-colors flex items-center gap-2"
+                                            >
+                                                <Clock className="w-4 h-4 text-yellow-500" />
+                                                Mark as New
+                                            </button>
+                                            <button
+                                                onClick={() => handleBulkStatusChange('completed')}
+                                                className="w-full px-4 py-3 text-left text-sm hover:bg-secondary/50 transition-colors flex items-center gap-2"
+                                            >
+                                                <CheckCircle className="w-4 h-4 text-green-500" />
+                                                Mark as Completed
+                                            </button>
+                                            <button
+                                                onClick={() => handleBulkStatusChange('failed')}
+                                                className="w-full px-4 py-3 text-left text-sm hover:bg-secondary/50 transition-colors flex items-center gap-2"
+                                            >
+                                                <XCircle className="w-4 h-4 text-red-500" />
+                                                Mark as Failed
+                                            </button>
+                                            <div className="border-t border-border">
+                                                <button
+                                                    onClick={handleBulkDelete}
+                                                    disabled={bulkDeleting}
+                                                    className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-500/10 transition-colors flex items-center gap-2"
                             >
-                                {isAutoDialing ? (
-                                    <><XCircle className="w-4 h-4" /> Stop Dialing</>
+                                                    {bulkDeleting ? (
+                                                        <RefreshCw className="w-4 h-4 animate-spin" />
                                 ) : (
-                                    <><Play className="w-4 h-4" /> Start Auto-Dialer ({selectedDriverIds.size})</>
-                                )}
+                                                        <Trash2 className="w-4 h-4" />
+                                                    )}
+                                                    Delete Selected
                             </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                         </div>
 
+                {/* Add Driver Form */}
+                <div className="glass-card rounded-2xl p-6 border border-border">
+                    <h2 className="text-lg font-bold text-foreground flex items-center gap-2 mb-4">
+                        <UserPlus className="w-5 h-5 text-primary" />
+                        Add New Driver
+                    </h2>
                         <form onSubmit={addDriver} className="flex flex-col sm:flex-row gap-4">
                             <input
                                 type="text"
@@ -594,79 +797,65 @@ export default function DriversPage() {
                                 className="flex-1 px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
                                 required
                             />
-                            <button
-                                type="submit"
-                                className="px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-xl transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 flex items-center justify-center gap-2 whitespace-nowrap"
-                            >
+                        <Button3D type="submit" variant="primary">
+                            <UserPlus className="w-4 h-4" />
                                 Add Driver
-                            </button>
+                        </Button3D>
                         </form>
                     </div>
 
-                    {/* Active Queue Section - Conditionally Visible */}
-                    {(isAutoDialing || selectedDriverIds.size > 0) && (
-                        <div className="glass-card rounded-2xl overflow-hidden mb-8 border-2 border-primary/20 shadow-lg shadow-primary/10 animate-in slide-in-from-top-4 duration-300">
-                            <div className="p-4 border-b border-border flex justify-between items-center bg-primary/5">
-                                <h2 className="text-lg font-bold text-primary flex items-center gap-2">
-                                    <Play className="w-5 h-5" />
-                                    Active Call Queue
-                                </h2>
-                                <span className="px-3 py-1 rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                                    {selectedDriverIds.size} queued
-                                </span>
-                            </div>
-                            <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
-                                {drivers.filter(d => selectedDriverIds.has(d.id)).map(driver => (
-                                    <div key={driver.id} className="p-4 flex items-center justify-between hover:bg-secondary/30 transition-colors">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                                                {driver.name.charAt(0)}
+                {/* Auto-Dialer Control */}
+                <div className="glass-card rounded-2xl p-6 border border-border bg-gradient-to-r from-primary/5 to-violet-500/5">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isAutoDialing ? 'bg-red-500/10 animate-pulse' : 'bg-primary/10'}`}>
+                                <Play className={`w-6 h-6 ${isAutoDialing ? 'text-red-500' : 'text-primary'}`} />
                                             </div>
                                             <div>
-                                                <h3 className="font-semibold text-foreground text-sm">{driver.name}</h3>
-                                                <p className="text-xs text-muted-foreground">{driver.phone}</p>
+                                <h3 className="font-bold text-foreground">Auto-Dialer</h3>
+                                <p className="text-sm text-muted-foreground">
+                                    {isAutoDialing
+                                        ? `Calling selected drivers (${selectedDriverIds.size} in queue)...`
+                                        : `Select drivers to start auto-dialing`}
+                                </p>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            {driver.status === 'calling' && (
-                                                <span className="text-xs font-bold text-blue-500 animate-pulse mr-2">Calling...</span>
-                                            )}
-                                            <button
-                                                onClick={() => toggleSelectDriver(driver.id)}
-                                                className="p-1.5 hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-lg transition-colors"
-                                                title="Remove from Queue"
-                                            >
-                                                <XCircle className="w-4 h-4" />
-                                            </button>
+                        <Button3D
+                            onClick={() => isAutoDialing ? stopAutoDialing() : startAutoDialing()}
+                            disabled={!isAutoDialing && selectedDriverIds.size === 0}
+                            variant={isAutoDialing ? "danger" : "primary"}
+                            size="lg"
+                        >
+                            {isAutoDialing ? (
+                                <><Square className="w-5 h-5" /> Stop Dialing</>
+                            ) : (
+                                <><Play className="w-5 h-5" /> Start Dialing ({selectedDriverIds.size})</>
+                            )}
+                        </Button3D>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
-                    {/* Driver Database Card */}
-                    <div className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-6 border-b border-border flex justify-between items-center bg-secondary/30">
+                {/* Driver List */}
+                <div className="glass-card rounded-2xl overflow-hidden border border-border">
+                    <div className="p-4 border-b border-border flex justify-between items-center bg-secondary/30">
                             <div className="flex items-center gap-3">
                                 <input
                                     type="checkbox"
-                                    checked={drivers.length > 0 && selectedDriverIds.size === drivers.length}
+                                checked={filteredDrivers.length > 0 && selectedDriverIds.size === filteredDrivers.length}
                                     onChange={toggleSelectAll}
                                     className="w-5 h-5 rounded border-border bg-background text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                 />
-                                <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                                    <Clock className="w-5 h-5 text-primary" />
+                            <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
                                     Driver Database
                                 </h2>
                             </div>
                             <span className="px-3 py-1 rounded-full bg-background border border-border text-xs font-bold text-muted-foreground">
-                                {drivers.length} total
+                            {filteredDrivers.length} of {drivers.length}
                             </span>
                         </div>
-                        <div className="divide-y divide-border">
-                            {Array.isArray(drivers) && drivers.map(driver => (
-                                <div key={driver.id} className={`p-5 flex items-center justify-between hover:bg-secondary/30 transition-colors group ${selectedDriverIds.has(driver.id) ? 'bg-primary/5' : ''}`}>
+                    <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
+                        {filteredDrivers.map(driver => (
+                            <div key={driver.id} className={`p-4 flex items-center justify-between hover:bg-secondary/30 transition-colors group ${selectedDriverIds.has(driver.id) ? 'bg-primary/5' : ''}`}>
                                     <div className="flex items-center gap-4">
                                         <input
                                             type="checkbox"
@@ -674,7 +863,7 @@ export default function DriversPage() {
                                             onChange={() => toggleSelectDriver(driver.id)}
                                             className="w-5 h-5 rounded border-border bg-background text-primary focus:ring-primary/20 transition-all cursor-pointer"
                                         />
-                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center text-primary font-bold text-lg">
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-violet-500/20 flex items-center justify-center text-primary font-bold">
                                             {driver.name.charAt(0)}
                                         </div>
                                         <div>
@@ -688,23 +877,24 @@ export default function DriversPage() {
                                             <button
                                                 onClick={() => setEditingDriver(driver)}
                                                 className="p-2 hover:bg-secondary rounded-lg text-muted-foreground hover:text-primary transition-colors"
-                                                title="Edit Driver"
+                                            title="Edit"
                                             >
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteDriver(driver.id)}
                                                 className="p-2 hover:bg-red-500/10 rounded-lg text-muted-foreground hover:text-red-500 transition-colors"
-                                                title="Delete Driver"
+                                            title="Delete"
                                             >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                            <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
 
+                                    {/* Status Badge & Actions */}
                                         {driver.status === 'completed' ? (
                                             <div className="flex gap-3 items-center">
                                                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-green-500/10 text-green-600 border border-green-500/20">
-                                                    <CheckCircle className="w-3.5 h-3.5" /> Qualified
+                                                <CheckCircle className="w-3.5 h-3.5" /> Completed
                                                 </span>
                                                 {driver.calls && driver.calls.length > 0 && (
                                                     <button
@@ -718,7 +908,7 @@ export default function DriversPage() {
                                         ) : driver.status === 'failed' ? (
                                             <div className="flex items-center gap-2">
                                                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-500/10 text-red-600 border border-red-500/20">
-                                                    <XCircle className="w-3.5 h-3.5" /> Call Failed
+                                                <XCircle className="w-3.5 h-3.5" /> Failed
                                                 </span>
                                                 <button
                                                     onClick={() => startCall(driver.id)}
@@ -738,85 +928,66 @@ export default function DriversPage() {
                                                             const callId = driver.calls[0].id;
                                                             try {
                                                                 await fetch(`/api/calls/${callId}/sync`, { method: 'POST' });
-                                                                fetchDrivers(); // Refresh list
+                                                            fetchDrivers();
                                                             } catch (e) {
                                                                 console.error('Sync failed', e);
                                                             }
                                                         }
                                                     }}
                                                     className="text-xs bg-secondary hover:bg-secondary/80 px-2 py-1 rounded text-muted-foreground transition-colors"
-                                                    title="Sync Status (Use on Localhost)"
                                                 >
                                                     🔄 Sync
                                                 </button>
                                             </div>
                                         ) : (
-                                            <button
+                                        <div className="flex gap-2">
+                                            {/* AI Call Button */}
+                                            <Button3D
                                                 onClick={() => startCall(driver.id)}
                                                 disabled={activeCall !== null}
-                                                className="inline-flex items-center gap-2 px-4 py-2 bg-foreground text-background rounded-lg text-sm font-bold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg"
+                                                variant="success"
+                                                size="sm"
                                             >
-                                                <Phone className="w-4 h-4" /> Call Now
-                                            </button>
+                                                <Zap className="w-4 h-4" /> AI Call
+                                            </Button3D>
+                                            {/* Click-to-Call Button */}
+                                            <Button3D
+                                                onClick={() => startClickToCall(driver)}
+                                                disabled={!!clickToCallActive}
+                                                variant="primary"
+                                                size="sm"
+                                                title={isClickToCallConfigured ? 'Manual call through virtual number' : 'Click-to-call not configured'}
+                                            >
+                                                <PhoneCall className="w-4 h-4" /> Call
+                                            </Button3D>
+                                        </div>
                                         )}
                                     </div>
                                 </div>
                             ))}
-                            {drivers.length === 0 && (
+                        {filteredDrivers.length === 0 && (
                                 <div className="p-12 text-center text-muted-foreground">
                                     <div className="w-16 h-16 bg-secondary/50 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    {searchQuery || statusFilter !== 'all' ? (
+                                        <Search className="w-8 h-8 opacity-50" />
+                                    ) : (
                                         <User className="w-8 h-8 opacity-50" />
-                                    </div>
-                                    <p className="font-medium">No drivers in database</p>
-                                    <p className="text-sm opacity-70">Add a driver to get started</p>
-                                </div>
+                            )}
+                        </div>
+                                <p className="font-medium">
+                                    {searchQuery || statusFilter !== 'all' ? 'No matching drivers found' : 'No drivers in database'}
+                                </p>
+                                <p className="text-sm opacity-70">
+                                    {searchQuery || statusFilter !== 'all' ? 'Try adjusting your search or filters' : 'Add a driver to get started'}
+                                </p>
+                            </div>
                             )}
                         </div>
                     </div>
                 </div>
 
-                {/* Right Column: Recent Results */}
-                <div className="space-y-8 sticky top-6">
-                    {/* Interview Results Preview */}
-                    <div className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-4 border-b border-border bg-secondary/30">
-                            <h2 className="text-sm font-bold text-foreground flex items-center gap-2 uppercase tracking-wider">
-                                <FileText className="w-4 h-4" /> Recent Results
-                            </h2>
-                        </div>
-                        <div className="p-4 max-h-[400px] overflow-y-auto">
-                            {drivers.filter(d => d.status === 'completed').length > 0 ? (
-                                <div className="space-y-4">
-                                    {drivers.filter(d => d.status === 'completed').map(driver => (
-                                        <div key={driver.id} className="border border-border rounded-xl p-4 hover:border-primary/50 transition-colors bg-secondary/10">
-                                            <h4 className="font-bold text-sm text-foreground mb-3 flex items-center gap-2">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                                                {driver.name}
-                                            </h4>
-                                            <div className="space-y-3">
-                                                {driver.responses && Object.entries(driver.responses).map(([key, value]) => (
-                                                    <div key={key} className="text-sm group">
-                                                        <span className="text-muted-foreground text-xs block mb-0.5 font-medium group-hover:text-primary transition-colors">
-                                                            {TRUCK_DRIVER_AGENT_CONFIG.questions.find(q => q.id === key)?.text}
-                                                        </span>
-                                                        <span className="text-foreground pl-2 border-l-2 border-primary/20 block">
-                                                            {String(value)}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="text-sm text-muted-foreground text-center py-8">
-                                    No completed interviews yet
-                                </p>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div >
-        </Layout >
+            {/* Click-to-Call Dialer */}
+            {isDialerOpen && <CallDialer />}
+        </Layout>
     );
 }

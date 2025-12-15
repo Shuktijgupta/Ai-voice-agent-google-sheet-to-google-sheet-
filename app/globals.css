@@ -90,3 +90,294 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.05);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
 }
+
+/* Enhanced Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.5); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Gradient Text */
+.gradient-text {
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Card Hover Effects */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.15);
+}
+
+.dark .card-hover:hover {
+  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.4);
+}
+
+/* Status Indicator */
+.status-dot {
+  position: relative;
+}
+
+.status-dot::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.status-dot.connected::after {
+  background: rgba(34, 197, 94, 0.4);
+}
+
+.status-dot.disconnected::after {
+  background: rgba(234, 179, 8, 0.4);
+}
+
+@keyframes ping {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* Focus ring */
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   3D Push Button Styles (Uiverse.io inspired)
+   ============================================ */
+
+/* Base button reset */
+.btn-3d {
+  --btn-radius: 0.75em;
+  --btn-color: #e8e8e8;
+  --btn-outline: #1e293b;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--btn-radius);
+  background: var(--btn-outline);
+  padding: 0;
+  font-family: inherit;
+}
+
+.btn-3d:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-3d-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  box-sizing: border-box;
+  border: 2px solid var(--btn-outline);
+  border-radius: var(--btn-radius);
+  padding: 0.65em 1.25em;
+  background: var(--btn-color);
+  color: var(--btn-outline);
+  transform: translateY(-0.2em);
+  transition: transform 0.1s ease;
+}
+
+.btn-3d:hover:not(:disabled) .btn-3d-inner {
+  transform: translateY(-0.33em);
+}
+
+.btn-3d:active:not(:disabled) .btn-3d-inner {
+  transform: translateY(0);
+}
+
+/* Primary variant - Indigo */
+.btn-3d-primary {
+  --btn-color: #6366f1;
+  --btn-outline: #3730a3;
+}
+
+.btn-3d-primary .btn-3d-inner {
+  color: #ffffff;
+  border-color: #4338ca;
+}
+
+/* Success variant - Green */
+.btn-3d-success {
+  --btn-color: #22c55e;
+  --btn-outline: #15803d;
+}
+
+.btn-3d-success .btn-3d-inner {
+  color: #ffffff;
+  border-color: #16a34a;
+}
+
+/* Danger variant - Red */
+.btn-3d-danger {
+  --btn-color: #ef4444;
+  --btn-outline: #b91c1c;
+}
+
+.btn-3d-danger .btn-3d-inner {
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+/* Warning variant - Amber */
+.btn-3d-warning {
+  --btn-color: #f59e0b;
+  --btn-outline: #b45309;
+}
+
+.btn-3d-warning .btn-3d-inner {
+  color: #ffffff;
+  border-color: #d97706;
+}
+
+/* Secondary variant - Gray */
+.btn-3d-secondary {
+  --btn-color: #f1f5f9;
+  --btn-outline: #64748b;
+}
+
+.btn-3d-secondary .btn-3d-inner {
+  color: #1e293b;
+  border-color: #94a3b8;
+}
+
+/* Dark mode adjustments */
+.dark .btn-3d {
+  --btn-color: #1e293b;
+  --btn-outline: #0f172a;
+}
+
+.dark .btn-3d .btn-3d-inner {
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+.dark .btn-3d-primary {
+  --btn-color: #4f46e5;
+  --btn-outline: #312e81;
+}
+
+.dark .btn-3d-primary .btn-3d-inner {
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+.dark .btn-3d-success {
+  --btn-color: #16a34a;
+  --btn-outline: #14532d;
+}
+
+.dark .btn-3d-success .btn-3d-inner {
+  color: #ffffff;
+  border-color: #22c55e;
+}
+
+.dark .btn-3d-danger {
+  --btn-color: #dc2626;
+  --btn-outline: #7f1d1d;
+}
+
+.dark .btn-3d-danger .btn-3d-inner {
+  color: #ffffff;
+  border-color: #ef4444;
+}
+
+/* Size variants */
+.btn-3d-sm {
+  font-size: 13px;
+}
+
+.btn-3d-sm .btn-3d-inner {
+  padding: 0.5em 1em;
+}
+
+.btn-3d-lg {
+  font-size: 17px;
+}
+
+.btn-3d-lg .btn-3d-inner {
+  padding: 0.75em 1.75em;
+}
+
+.btn-3d-xl {
+  font-size: 19px;
+}
+
+.btn-3d-xl .btn-3d-inner {
+  padding: 0.85em 2em;
+}
+
+/* Icon-only button */
+.btn-3d-icon .btn-3d-inner {
+  padding: 0.65em;
+}
+
+/* Full width */
+.btn-3d-full {
+  width: 100%;
+}
+
+.btn-3d-full .btn-3d-inner {
+  width: 100%;
+}

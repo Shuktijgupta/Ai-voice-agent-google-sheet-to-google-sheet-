@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Button3D } from '@/components/Button3D';
 import { Lock, Mail, ArrowRight, Loader2, Sparkles } from 'lucide-react';
 
 export default function LoginPage() {
@@ -93,10 +94,12 @@ export default function LoginPage() {
                         </div>
                     </div>
 
-                    <button
+                    <Button3D
                         type="submit"
                         disabled={loading}
-                        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-4 rounded-xl transition-all transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40"
+                        variant="primary"
+                        size="lg"
+                        fullWidth
                     >
                         {loading ? (
                             <Loader2 className="w-5 h-5 animate-spin" />
@@ -105,7 +108,7 @@ export default function LoginPage() {
                                 Sign In <ArrowRight className="w-5 h-5" />
                             </>
                         )}
-                    </button>
+                    </Button3D>
                 </form>
 
                 <div className="mt-8 text-center text-sm text-muted-foreground">
