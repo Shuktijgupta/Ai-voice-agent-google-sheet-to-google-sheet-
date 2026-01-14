@@ -189,6 +189,92 @@ export const useClickToCallStore = create<ClickToCallState>((set, get) => ({
     clearHistory: () => set({ callHistory: [] }),
 }));
 
+// ============================================
+// REAL-TIME CALL MONITORING STORE
+// ============================================
+
+interface RealtimeCallState {
+    // Active calls being monitored
+    activeCalls: Map<string, any>;
+    liveTranscripts: Map<string, string[]>;
+    callStatuses: Map<string, string>;
+    
+    // Connection state
+    isConnected: boolean;
+    connectionError: string | null;
+    
+    // Actions
+    setActiveCalls: (calls: any[]) => void;
+    updateCall: (callId: string, updates: Partial<any>) => void;
+    addTranscriptLine: (callId: string, line: string) => void;
+    updateCallStatus: (callId: string, status: string) => void;
+    setConnectionState: (connected: boolean, error?: string | null) => void;
+    clearCall: (callId: string) => void;
+    clearAll: () => void;
+}
+
+export const useRealtimeCallStore = create<RealtimeCallState>((set, get) => ({
+    activeCalls: new Map(),
+    liveTranscripts: new Map(),
+    callStatuses: new Map(),
+    isConnected: false,
+    connectionError: null,
+    
+    setActiveCalls: (calls) => {
+        const callsMap = new Map();
+        calls.forEach(call => {
+            callsMap.set(call.id, call);
+        });
+        set({ activeCalls: callsMap });
+    },
+    
+    updateCall: (callId, updates) => {
+        const current = get().activeCalls.get(callId);
+        if (current) {
+            const updated = { ...current, ...updates };
+            const newMap = new Map(get().activeCalls);
+            newMap.set(callId, updated);
+            set({ activeCalls: newMap });
+        }
+    },
+    
+    addTranscriptLine: (callId, line) => {
+        const current = get().liveTranscripts.get(callId) || [];
+        const newLines = [...current, line];
+        const newMap = new Map(get().liveTranscripts);
+        newMap.set(callId, newLines);
+        set({ liveTranscripts: newMap });
+    },
+    
+    updateCallStatus: (callId, status) => {
+        const newMap = new Map(get().callStatuses);
+        newMap.set(callId, status);
+        set({ callStatuses: newMap });
+    },
+    
+    setConnectionState: (connected, error = null) => {
+        set({ isConnected: connected, connectionError: error });
+    },
+    
+    clearCall: (callId) => {
+        const activeCalls = new Map(get().activeCalls);
+        const transcripts = new Map(get().liveTranscripts);
+        const statuses = new Map(get().callStatuses);
+        activeCalls.delete(callId);
+        transcripts.delete(callId);
+        statuses.delete(callId);
+        set({ activeCalls, liveTranscripts: transcripts, callStatuses: statuses });
+    },
+    
+    clearAll: () => {
+        set({
+            activeCalls: new Map(),
+            liveTranscripts: new Map(),
+            callStatuses: new Map(),
+        });
+    },
+}));
+
 // Helper hook for sync operations
 export const useSync = () => {
     const store = useSyncStore();

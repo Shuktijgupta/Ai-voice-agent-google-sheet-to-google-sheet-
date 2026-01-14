@@ -118,16 +118,35 @@ export default function IntegrationsPage() {
             // Update provider statuses
             const elevenLabsProvider = data.availableProviders?.find((p: ProviderInfo) => p.id === 'elevenlabs');
             const bolnaProvider = data.availableProviders?.find((p: ProviderInfo) => p.id === 'bolna');
+            const ollamaProvider = data.availableProviders?.find((p: ProviderInfo) => p.id === 'ollama');
+            
+            // Check Ollama directly if Bolna not configured
+            let ollamaRunning = false;
+            if (!bolnaProvider?.configured) {
+                try {
+                    const ollamaRes = await fetch('/api/bolna/config');
+                    const ollamaData = await ollamaRes.json();
+                    ollamaRunning = ollamaData.ollama?.running && (ollamaData.ollama?.models?.length || 0) > 0;
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
             
             setStatus(prev => ({ 
                 ...prev, 
                 elevenLabs: elevenLabsProvider?.configured || false,
-                bolna: bolnaProvider?.configured || false,
+                bolna: bolnaProvider?.configured || ollamaRunning || ollamaProvider?.configured || false,
             }));
             
-            // Store Bolna config if available
+            // Store Bolna config if available, or Ollama config
             if (bolnaProvider?.config) {
                 setBolnaConfig(bolnaProvider.config);
+            } else if (ollamaProvider?.config) {
+                setBolnaConfig({
+                    llm: ollamaProvider.config.llm,
+                    tts: 'ollama (direct)',
+                    isFullyLocal: true,
+                });
             }
         } catch (error) {
             console.error('Failed to fetch provider settings:', error);
@@ -206,6 +225,15 @@ export default function IntegrationsPage() {
                 setBolnaConfig(data.currentConfig);
                 const localStatus = data.currentConfig?.isFullyLocal ? ' (Fully Local)' : '';
                 showToast(`Bolna server configured${localStatus}!`, 'success');
+            } else if (data.ollama?.running && data.ollama.models?.length > 0) {
+                // Ollama is running directly - mark as configured
+                setStatus(prev => ({ ...prev, bolna: true }));
+                setBolnaConfig({
+                    llm: `ollama/${data.ollama.models[0]}`,
+                    tts: 'direct ollama',
+                    isFullyLocal: true,
+                });
+                showToast(`✅ Ollama is running with ${data.ollama.models.length} model(s)! Local AI is ready.`, 'success');
             } else if (!data.ollama?.running) {
                 showToast('Neither Bolna nor Ollama detected. Install Ollama from ollama.com', 'error');
             }
@@ -257,10 +285,22 @@ export default function IntegrationsPage() {
         try {
             const res = await fetch('/api/integrations/google-sheets/check-status');
             const data = await res.json();
+            
+            // Also check Ollama status directly
+            let ollamaRunning = false;
+            try {
+                const ollamaRes = await fetch('/api/bolna/config');
+                const ollamaData = await ollamaRes.json();
+                ollamaRunning = ollamaData.ollama?.running && (ollamaData.ollama?.models?.length || 0) > 0;
+            } catch (e) {
+                // Ignore errors
+            }
+            
             setStatus(prev => ({
                 ...prev,
                 googleSheets: data.connected || false,
                 blandAi: data.blandConfigured || false,
+                bolna: ollamaRunning, // Set Bolna status based on Ollama if not already set
                 sheetId: data.sheetId
             }));
             if (showRefresh) showToast('Status refreshed successfully', 'info');
@@ -840,7 +880,7 @@ export default function IntegrationsPage() {
                                             {feature}
                                         </div>
                                     ))}
-                                    {['Hindi Support', 'Twilio/Plivo', 'Full Privacy', 'Open Source'].map((feature) => (
+                                    {['Hindi Support', 'Indian Telephony', 'Full Privacy', 'Open Source'].map((feature) => (
                                         <div key={feature} className="flex items-center gap-2 text-sm text-muted-foreground">
                                             <CheckCircle2 className="w-4 h-4 text-cyan-500" />
                                             {feature}
@@ -851,7 +891,7 @@ export default function IntegrationsPage() {
                                 {!status.bolna && (
                                     <div className="mt-4 p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-xl">
                                         <p className="text-xs text-muted-foreground">
-                                            <strong>Requirements:</strong> Docker, Ollama, XTTS server, Deepgram API key, Twilio/Plivo account
+                                            <strong>Requirements:</strong> Docker, Ollama, XTTS server, Deepgram API key, Indian telephony provider (Exotel, Knowlarity, Ozonetel, Plivo)
                                         </p>
                                     </div>
                                 )}

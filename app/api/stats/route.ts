@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { cache } from '@/lib/cache';
 
 // Cache stats for 10 seconds to reduce DB load
-let statsCache: { data: unknown; timestamp: number } | null = null;
 const CACHE_TTL = 10000; // 10 seconds
 
 export async function GET() {
     try {
-        const now = Date.now();
-        
-        // Return cached data if still valid
-        if (statsCache && (now - statsCache.timestamp) < CACHE_TTL) {
-            const response = NextResponse.json(statsCache.data);
+        // Check cache
+        const cacheKey = 'stats:all';
+        const cached = cache.get(cacheKey);
+        if (cached) {
+            const response = NextResponse.json(cached);
             response.headers.set('X-Cache', 'HIT');
             response.headers.set('Cache-Control', 'private, max-age=10');
             return response;
@@ -67,7 +67,7 @@ export async function GET() {
         };
 
         // Update cache
-        statsCache = { data, timestamp: now };
+        cache.set(cacheKey, data, CACHE_TTL);
 
         const response = NextResponse.json(data);
         response.headers.set('X-Cache', 'MISS');

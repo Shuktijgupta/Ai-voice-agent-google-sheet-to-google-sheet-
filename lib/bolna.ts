@@ -7,7 +7,7 @@
  * - Cloud LLMs (OpenAI, Groq, Together, etc.)
  * - Multiple ASR providers (Deepgram, Whisper)
  * - Multiple TTS providers (ElevenLabs, OpenAI, Polly, XTTS for local)
- * - Telephony (Twilio, Plivo)
+ * - Telephony (Indian providers: Plivo, Exotel, Knowlarity, Ozonetel)
  */
 
 // Type definitions
@@ -23,8 +23,8 @@ export interface BolnaConfig {
     // TTS Configuration
     ttsProvider: 'elevenlabs' | 'openai' | 'polly' | 'xtts' | 'deepgram';
     ttsVoice?: string;
-    // Telephony
-    telephonyProvider?: 'twilio' | 'plivo';
+    // Telephony (Indian providers)
+    telephonyProvider?: 'plivo' | 'exotel' | 'knowlarity' | 'ozonetel';
 }
 
 export interface BolnaCallOptions {
@@ -100,7 +100,7 @@ export function getBolnaConfig(): BolnaConfig | null {
         ttsProvider: (process.env.BOLNA_TTS_PROVIDER as BolnaConfig['ttsProvider']) || 'xtts',
         ttsVoice: process.env.BOLNA_TTS_VOICE,
         // Telephony
-        telephonyProvider: process.env.BOLNA_TELEPHONY_PROVIDER as 'twilio' | 'plivo' | undefined,
+        telephonyProvider: process.env.BOLNA_TELEPHONY_PROVIDER as 'plivo' | 'exotel' | 'knowlarity' | 'ozonetel' | undefined,
     };
 }
 
@@ -204,11 +204,11 @@ export async function sendBolnaCall(options: BolnaCallOptions): Promise<BolnaCal
                         audio_format: 'wav',
                     },
                     input: {
-                        provider: config.telephonyProvider || 'twilio',
+                        provider: config.telephonyProvider || 'plivo',
                         format: 'wav',
                     },
                     output: {
-                        provider: config.telephonyProvider || 'twilio',
+                        provider: config.telephonyProvider || 'plivo',
                         format: 'wav',
                     },
                 },

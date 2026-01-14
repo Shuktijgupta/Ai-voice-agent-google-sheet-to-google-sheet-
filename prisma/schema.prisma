@@ -22,6 +22,7 @@ model Driver {
 
   calls              Call[]
   interviewResponses InterviewResponse[]
+  scheduledCalls      ScheduledCall[]
 
   @@map("drivers")
 }
@@ -46,12 +47,18 @@ model Call {
   answeredBy      String?   @map("answered_by")
   analysis        String?   // JSON string
   variables       String?   // JSON string
+  cost            Float?    // Cost in local currency
+  costCurrency    String?   @default("USD") @map("cost_currency")
 
   driver             Driver              @relation(fields: [driverId], references: [id])
   agent              Agent?              @relation(fields: [agentId], references: [id])
   interviewResponses InterviewResponse[]
+  scheduledCall      ScheduledCall?
+  costRecord         CostRecord?
 
   @@map("calls")
+  @@index([provider])
+  @@index([startTime])
 }
 
 model Agent {
@@ -63,6 +70,7 @@ model Agent {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   calls Call[]
+  scheduledCalls ScheduledCall[]
 
   @@map("agents")
 }
@@ -100,4 +108,44 @@ model Settings {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+model ScheduledCall {
+  id          String   @id @default(uuid())
+  driverId    String   @map("driver_id")
+  agentId     String?  @map("agent_id")
+  scheduledAt DateTime  @map("scheduled_at")
+  timezone    String   @default("UTC")
+  status      String   @default("pending") // pending, queued, completed, failed, cancelled
+  retryCount  Int      @default(0) @map("retry_count")
+  maxRetries  Int      @default(3) @map("max_retries")
+  recurring   String?  // null, daily, weekly, monthly
+  callId      String?  @map("call_id") // Reference to actual call when executed
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+  agent  Agent? @relation(fields: [agentId], references: [id])
+  call   Call?  @relation(fields: [callId], references: [id])
+
+  @@map("scheduled_calls")
+  @@index([scheduledAt])
+  @@index([status])
+}
+
+model CostRecord {
+  id          String   @id @default(uuid())
+  callId      String?  @unique @map("call_id")
+  provider    String   // bland, exotel, knowlarity, etc.
+  cost        Float
+  currency    String   @default("USD")
+  duration    Int?     // Duration in seconds
+  metadata    String?  // JSON string for additional cost details
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  call Call? @relation(fields: [callId], references: [id])
+
+  @@map("cost_records")
+  @@index([provider])
+  @@index([createdAt])
 }

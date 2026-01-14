@@ -1,13 +1,28 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Layout from '@/components/Layout';
-import { Phone, Calendar, Clock, User, FileText, Play, Activity, XCircle, Download, Copy } from 'lucide-react';
+import { Phone, Calendar, Clock, User, FileText, Play, Activity, XCircle, Download, Copy, Radio } from 'lucide-react';
+import { useRealtimeCallStore } from '@/lib/store';
 
 export default function CallHistoryPage() {
     const [calls, setCalls] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
+    const eventSourceRef = useRef<EventSource | null>(null);
+    
+    // Real-time monitoring
+    const {
+        activeCalls,
+        liveTranscripts,
+        callStatuses,
+        isConnected,
+        setActiveCalls,
+        updateCall,
+        addTranscriptLine,
+        updateCallStatus,
+        setConnectionState,
+    } = useRealtimeCallStore();
 
     useEffect(() => {
         const fetchCalls = async () => {
@@ -23,7 +38,51 @@ export default function CallHistoryPage() {
         };
 
         fetchCalls();
-    }, []);
+        
+        // Set up real-time monitoring
+        const eventSource = new EventSource('/api/calls/stream');
+        eventSourceRef.current = eventSource;
+        
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'update' && data.calls) {
+                    setActiveCalls(data.calls);
+                    // Update main calls list with latest data
+                    setCalls(prev => {
+                        const updated = [...prev];
+                        data.calls.forEach((call: any) => {
+                            const index = updated.findIndex(c => c.id === call.id);
+                            if (index >= 0) {
+                                updated[index] = { ...updated[index], ...call };
+                            } else {
+                                updated.unshift(call);
+                            }
+                        });
+                        return updated;
+                    });
+                } else if (data.type === 'transcript') {
+                    addTranscriptLine(data.call.id, data.transcript);
+                } else if (data.type === 'status') {
+                    updateCallStatus(data.call.id, data.status);
+                }
+            } catch (error) {
+                console.error('Error parsing SSE message:', error);
+            }
+        };
+        
+        eventSource.onerror = () => {
+            setConnectionState(false, 'Connection error');
+        };
+        
+        eventSource.onopen = () => {
+            setConnectionState(true);
+        };
+        
+        return () => {
+            eventSource.close();
+        };
+    }, [setActiveCalls, addTranscriptLine, updateCallStatus, setConnectionState]);
 
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleString();
@@ -91,35 +150,11 @@ export default function CallHistoryPage() {
         });
     };
 
-    const [activeCall, setActiveCall] = useState<any>(null);
-
-    // Poll for active calls
-    useEffect(() => {
-        const checkActiveCalls = async () => {
-            try {
-                // Check if any driver is in 'calling' state
-                const res = await fetch('/api/drivers');
-                const drivers = await res.json();
-                const activeDriver = drivers.find((d: any) => d.status === 'calling');
-
-                if (activeDriver) {
-                    // In a real app, you'd fetch live logs from a websocket or API
-                    // For now, we'll simulate or show a placeholder if no logs are available
-                    setActiveCall({
-                        driverId: activeDriver.id,
-                        logs: [`System: Call in progress with ${activeDriver.name}...`]
-                    });
-                } else {
-                    setActiveCall(null);
-                }
-            } catch (error) {
-                console.error('Failed to check active calls:', error);
-            }
-        };
-
-        const interval = setInterval(checkActiveCalls, 3000);
-        return () => clearInterval(interval);
-    }, []);
+    // Get active call from real-time store
+    const activeCallArray = Array.from(activeCalls.values()).filter(
+        call => call.status === 'calling' || call.status === 'ringing' || call.status === 'queued'
+    );
+    const primaryActiveCall = activeCallArray[0];
 
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center bg-background">
@@ -259,24 +294,44 @@ export default function CallHistoryPage() {
                         <div className="glass-card rounded-2xl overflow-hidden h-[500px] flex flex-col">
                             <div className="p-4 border-b border-border bg-secondary/30">
                                 <h2 className="text-sm font-bold text-foreground flex items-center gap-2 uppercase tracking-wider">
-                                    <div className={`w-2 h-2 rounded-full ${activeCall ? 'bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-muted-foreground'}`}></div>
-                                    Live Call Transcript
+                                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`}></div>
+                                    Live Call Monitor {isConnected ? '(Connected)' : '(Disconnected)'}
                                 </h2>
                             </div>
                             <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-background/50 scrollbar-thin scrollbar-thumb-border">
-                                {activeCall ? (
-                                    activeCall.logs.map((log: string, i: number) => (
-                                        <div key={i} className={`flex ${log.startsWith('Agent:') ? 'justify-start' : log.startsWith('Driver:') ? 'justify-end' : 'justify-center'}`}>
-                                            <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${log.startsWith('Agent:')
-                                                ? 'bg-card text-foreground rounded-tl-none border border-border'
-                                                : log.startsWith('Driver:')
-                                                    ? 'bg-primary text-primary-foreground rounded-tr-none'
-                                                    : 'bg-transparent shadow-none text-muted-foreground text-xs py-1 font-mono'
-                                                }`}>
-                                                {log.replace(/^(Agent:|Driver:|System:)\s*/, '')}
+                                {primaryActiveCall ? (
+                                    <div className="space-y-4">
+                                        <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-xs font-semibold text-primary">Active Call</span>
+                                                <span className="text-xs text-muted-foreground capitalize">{primaryActiveCall.status}</span>
                                             </div>
+                                            <p className="text-sm font-medium text-foreground">{primaryActiveCall.driver?.name || 'Unknown'}</p>
+                                            <p className="text-xs text-muted-foreground">{primaryActiveCall.driver?.phone}</p>
+                                            {primaryActiveCall.durationSeconds && (
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                    Duration: {formatDuration(primaryActiveCall.durationSeconds)}
+                                                </p>
+                                            )}
                                         </div>
-                                    ))
+                                        {liveTranscripts.get(primaryActiveCall.id)?.map((line: string, i: number) => (
+                                            <div key={i} className={`flex ${line.startsWith('Agent:') ? 'justify-start' : line.startsWith('Driver:') ? 'justify-end' : 'justify-center'}`}>
+                                                <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${line.startsWith('Agent:')
+                                                    ? 'bg-card text-foreground rounded-tl-none border border-border'
+                                                    : line.startsWith('Driver:')
+                                                        ? 'bg-primary text-primary-foreground rounded-tr-none'
+                                                        : 'bg-transparent shadow-none text-muted-foreground text-xs py-1 font-mono'
+                                                    }`}>
+                                                    {line.replace(/^(Agent:|Driver:|System:)\s*/, '')}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {(!liveTranscripts.get(primaryActiveCall.id) || liveTranscripts.get(primaryActiveCall.id)?.length === 0) && (
+                                            <div className="text-center text-muted-foreground text-sm py-4">
+                                                Waiting for transcript...
+                                            </div>
+                                        )}
+                                    </div>
                                 ) : (
                                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
                                         <div className="w-20 h-20 rounded-full bg-secondary/50 flex items-center justify-center animate-pulse">
@@ -290,6 +345,26 @@ export default function CallHistoryPage() {
                                 )}
                             </div>
                         </div>
+                        
+                        {/* Active Calls Queue */}
+                        {activeCallArray.length > 1 && (
+                            <div className="glass-card rounded-2xl overflow-hidden border border-border">
+                                <div className="p-4 border-b border-border bg-secondary/30">
+                                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                                        <Radio className="w-4 h-4 text-primary" />
+                                        Call Queue ({activeCallArray.length})
+                                    </h3>
+                                </div>
+                                <div className="p-4 space-y-2 max-h-48 overflow-y-auto">
+                                    {activeCallArray.slice(1).map((call) => (
+                                        <div key={call.id} className="text-xs p-2 bg-secondary/30 rounded-lg">
+                                            <p className="font-medium">{call.driver?.name}</p>
+                                            <p className="text-muted-foreground capitalize">{call.status}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

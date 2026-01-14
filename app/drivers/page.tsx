@@ -43,6 +43,8 @@ export default function DriversPage() {
     // Bulk Actions State
     const [showBulkActions, setShowBulkActions] = useState(false);
     const [bulkDeleting, setBulkDeleting] = useState(false);
+    const [bulkOperation, setBulkOperation] = useState<string | null>(null);
+    const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
 
     // Global Sync & Dialer State from Zustand
     const {
@@ -175,19 +177,36 @@ export default function DriversPage() {
         if (!confirm(`Are you sure you want to delete ${selectedDriverIds.size} driver(s)? This cannot be undone.`)) return;
 
         setBulkDeleting(true);
+        setBulkOperation('delete');
+        setBulkProgress({ current: 0, total: selectedDriverIds.size });
+        
         try {
-            const deletePromises = Array.from(selectedDriverIds).map(id =>
-                fetch(`/api/drivers/${id}`, { method: 'DELETE' })
-            );
-            await Promise.all(deletePromises);
-            setDrivers(prev => prev.filter(d => !selectedDriverIds.has(d.id)));
-            setSelectedDriverIds(new Set());
-            setShowBulkActions(false);
+            const res = await fetch('/api/drivers/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    operation: 'delete',
+                    driverIds: Array.from(selectedDriverIds)
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setDrivers(prev => prev.filter(d => !selectedDriverIds.has(d.id)));
+                clearSelectedDrivers();
+                setShowBulkActions(false);
+                alert(`Successfully deleted ${data.result.count} drivers`);
+            } else {
+                const error = await res.json();
+                alert(`Delete failed: ${error.error}`);
+            }
         } catch (error) {
             console.error('Bulk delete failed:', error);
-            alert('Some deletions failed. Please try again.');
+            alert('Bulk delete failed');
         } finally {
             setBulkDeleting(false);
+            setBulkOperation(null);
+            setBulkProgress({ current: 0, total: 0 });
         }
     };
 
@@ -195,21 +214,119 @@ export default function DriversPage() {
     const handleBulkStatusChange = async (newStatus: string) => {
         if (selectedDriverIds.size === 0) return;
 
+        setBulkOperation('updateStatus');
+        setBulkProgress({ current: 0, total: selectedDriverIds.size });
+
         try {
-            const updatePromises = Array.from(selectedDriverIds).map(id =>
-                fetch(`/api/drivers/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: newStatus })
+            const res = await fetch('/api/drivers/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    operation: 'updateStatus',
+                    driverIds: Array.from(selectedDriverIds),
+                    data: { status: newStatus }
                 })
-            );
-            await Promise.all(updatePromises);
-            setDrivers(prev => prev.map(d => 
-                selectedDriverIds.has(d.id) ? { ...d, status: newStatus } : d
-            ));
-            setShowBulkActions(false);
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setDrivers(prev => prev.map(d => 
+                    selectedDriverIds.has(d.id) ? { ...d, status: newStatus } : d
+                ));
+                setShowBulkActions(false);
+                alert(`Updated ${data.result.count} drivers to ${newStatus}`);
+            } else {
+                const error = await res.json();
+                alert(`Update failed: ${error.error}`);
+            }
         } catch (error) {
             console.error('Bulk status change failed:', error);
+            alert('Bulk status change failed');
+        } finally {
+            setBulkOperation(null);
+            setBulkProgress({ current: 0, total: 0 });
+        }
+    };
+
+    // Bulk Call Initiation
+    const handleBulkCall = async () => {
+        if (selectedDriverIds.size === 0) return;
+        if (!confirm(`Initiate calls for ${selectedDriverIds.size} drivers?`)) return;
+
+        setBulkOperation('initiateCalls');
+        setBulkProgress({ current: 0, total: selectedDriverIds.size });
+
+        try {
+            const res = await fetch('/api/drivers/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    operation: 'initiateCalls',
+                    driverIds: Array.from(selectedDriverIds),
+                    data: { agentId: selectedAgentId || null }
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const successful = data.result.successful;
+                const failed = data.result.total - successful;
+                
+                alert(`Calls initiated: ${successful} successful, ${failed} failed`);
+                fetchDrivers();
+                setShowBulkActions(false);
+            } else {
+                const error = await res.json();
+                alert(`Bulk call failed: ${error.error}`);
+            }
+        } catch (error) {
+            console.error('Bulk call failed:', error);
+            alert('Bulk call initiation failed');
+        } finally {
+            setBulkOperation(null);
+            setBulkProgress({ current: 0, total: 0 });
+        }
+    };
+
+    // Bulk Export
+    const handleBulkExport = async () => {
+        if (selectedDriverIds.size === 0) return;
+
+        try {
+            const res = await fetch('/api/drivers/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    operation: 'export',
+                    driverIds: Array.from(selectedDriverIds)
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const drivers = data.result.drivers;
+                
+                const headers = ['Name', 'Phone', 'Email', 'Status', 'Total Calls', 'Last Call'];
+                const rows = drivers.map((d: any) => [
+                    d.name,
+                    d.phone,
+                    d.email || '',
+                    d.status,
+                    d.calls?.length || 0,
+                    d.calls?.[0]?.startTime ? new Date(d.calls[0].startTime).toLocaleString() : ''
+                ]);
+
+                const csv = [headers.join(','), ...rows.map((r: any[]) => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `drivers_export_${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+            }
+        } catch (error) {
+            console.error('Bulk export failed:', error);
+            alert('Export failed');
         }
     };
 

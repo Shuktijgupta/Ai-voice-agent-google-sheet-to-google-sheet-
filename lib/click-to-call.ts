@@ -2,7 +2,7 @@
  * Click-to-Call Service
  * 
  * This module handles click-to-call functionality with Tata Communications
- * or any other telephony provider (Twilio, Exotel, etc.)
+ * or any other telephony provider (Exotel, Knowlarity, Ozonetel, Plivo, etc.)
  * 
  * INTEGRATION GUIDE:
  * 1. Set the following environment variables:

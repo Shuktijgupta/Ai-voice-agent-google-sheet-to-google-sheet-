@@ -1,58 +1,85 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { decrypt } from '@/lib/auth';
 
-// Routes that don't require authentication
-const publicRoutes = ['/login', '/signup'];
-// API routes that don't require authentication
-const publicApiRoutes = ['/api/auth/login', '/api/auth/signup', '/api/bland/webhook', '/api/vapi/webhook'];
+// Simple in-memory rate limit store for Edge runtime
+// Note: This is per-instance and will reset on server restart
+// For production, consider using Redis or Vercel KV
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 
-export async function middleware(request: NextRequest) {
-    const { pathname } = request.nextUrl;
-    
-    // Skip public API routes
-    if (publicApiRoutes.some(route => pathname.startsWith(route))) {
-        return NextResponse.next();
+function checkRateLimit(
+    identifier: string,
+    maxRequests: number = 100,
+    windowMs: number = 60000
+): { allowed: boolean; remaining: number; resetTime: number } {
+    const now = Date.now();
+    const entry = rateLimitStore.get(identifier);
+
+    if (!entry || entry.resetTime < now) {
+        // Create new window
+        rateLimitStore.set(identifier, {
+            count: 1,
+            resetTime: now + windowMs
+        });
+        return {
+            allowed: true,
+            remaining: maxRequests - 1,
+            resetTime: now + windowMs
+        };
     }
 
-    const session = request.cookies.get('session')?.value;
+    if (entry.count >= maxRequests) {
+        return {
+            allowed: false,
+            remaining: 0,
+            resetTime: entry.resetTime
+        };
+    }
 
-    // Decrypt the session to verify it
-    let isAuthenticated = false;
-    if (session) {
-        try {
-            await decrypt(session);
-            isAuthenticated = true;
-        } catch {
-            // Invalid session - clear the cookie
-            const response = NextResponse.redirect(new URL('/login', request.url));
-            response.cookies.set('session', '', { expires: new Date(0) });
-            return response;
+    entry.count++;
+    rateLimitStore.set(identifier, entry);
+    return {
+        allowed: true,
+        remaining: maxRequests - entry.count,
+        resetTime: entry.resetTime
+    };
+}
+
+export function middleware(request: NextRequest) {
+    // Apply rate limiting to API routes
+    if (request.nextUrl.pathname.startsWith('/api/')) {
+        const identifier = request.headers.get('x-forwarded-for') || 
+                          request.headers.get('x-real-ip') || 
+                          request.ip || 
+                          'unknown';
+        
+        const result = checkRateLimit(identifier, 100, 60000); // 100 requests per minute
+
+        if (!result.allowed) {
+            return NextResponse.json(
+                { error: 'Rate limit exceeded', retryAfter: Math.ceil((result.resetTime - Date.now()) / 1000) },
+                {
+                    status: 429,
+                    headers: {
+                        'X-RateLimit-Limit': '100',
+                        'X-RateLimit-Remaining': result.remaining.toString(),
+                        'X-RateLimit-Reset': result.resetTime.toString(),
+                        'Retry-After': Math.ceil((result.resetTime - Date.now()) / 1000).toString()
+                    }
+                }
+            );
         }
-    }
 
-    // Redirect authenticated users away from login/signup
-    if (publicRoutes.includes(pathname) && isAuthenticated) {
-        return NextResponse.redirect(new URL('/', request.url));
-    }
-
-    // Protect all other routes
-    if (!publicRoutes.includes(pathname) && !isAuthenticated) {
-        return NextResponse.redirect(new URL('/login', request.url));
+        // Add rate limit headers to response
+        const response = NextResponse.next();
+        response.headers.set('X-RateLimit-Limit', '100');
+        response.headers.set('X-RateLimit-Remaining', result.remaining.toString());
+        response.headers.set('X-RateLimit-Reset', result.resetTime.toString());
+        return response;
     }
 
     return NextResponse.next();
 }
 
 export const config = {
-    matcher: [
-        /*
-         * Match all request paths except:
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - favicon.ico (favicon file)
-         * - public folder
-         */
-        '/((?!_next/static|_next/image|favicon.ico|.*\\..*|api/bland/webhook|api/vapi/webhook).*)',
-    ],
+    matcher: '/api/:path*'
 };
